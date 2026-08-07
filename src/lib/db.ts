@@ -7,6 +7,7 @@ import path from "node:path";
 const MIN_AGE_DDL = "min_age INTEGER";
 const MAX_AGE_DDL = "max_age INTEGER";
 const AGE_CONFIRMED_DDL = "age_confirmed INTEGER NOT NULL DEFAULT 0";
+const CONTACT_INFO_DDL = "contact_info TEXT";
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS tournaments (
@@ -21,6 +22,7 @@ CREATE TABLE IF NOT EXISTS tournaments (
   advance_per_group INTEGER NOT NULL DEFAULT 2,
   ${MIN_AGE_DDL},
   ${MAX_AGE_DDL},
+  ${CONTACT_INFO_DDL},
   status TEXT NOT NULL DEFAULT 'registration',
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -83,6 +85,12 @@ CREATE TABLE IF NOT EXISTS set_scores (
   UNIQUE (match_id, set_number)
 );
 
+CREATE TABLE IF NOT EXISTS tournament_posters (
+  tournament_id INTEGER PRIMARY KEY REFERENCES tournaments(id) ON DELETE CASCADE,
+  data BLOB NOT NULL,
+  mime TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_teams_tournament ON teams(tournament_id);
 CREATE INDEX IF NOT EXISTS idx_players_tournament ON players(tournament_id);
 CREATE INDEX IF NOT EXISTS idx_players_team ON players(team_id);
@@ -96,6 +104,7 @@ CREATE INDEX IF NOT EXISTS idx_set_scores_match ON set_scores(match_id);
 const MIGRATIONS: Array<{ table: string; column: string; ddl: string }> = [
   { table: "tournaments", column: "min_age", ddl: MIN_AGE_DDL },
   { table: "tournaments", column: "max_age", ddl: MAX_AGE_DDL },
+  { table: "tournaments", column: "contact_info", ddl: CONTACT_INFO_DDL },
   { table: "teams", column: "age_confirmed", ddl: AGE_CONFIRMED_DDL },
   { table: "players", column: "age_confirmed", ddl: AGE_CONFIRMED_DDL },
 ];

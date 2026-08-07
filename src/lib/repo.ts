@@ -32,6 +32,7 @@ export interface TournamentRow {
   advance_per_group: number;
   min_age: number | null;
   max_age: number | null;
+  contact_info: string | null;
   status: TournamentStatus;
 }
 
@@ -156,6 +157,7 @@ export interface TournamentSettings {
   advancePerGroup: number;
   minAge?: number | null;
   maxAge?: number | null;
+  contactInfo?: string | null;
 }
 
 function checkAgeBounds(s: TournamentSettings): void {
@@ -175,8 +177,8 @@ export function createTournament(s: TournamentSettings): number {
   const res = db
     .prepare(
       `INSERT INTO tournaments
-       (name, year, team_size, format, best_of, points_per_set, points_last_set, advance_per_group, min_age, max_age)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (name, year, team_size, format, best_of, points_per_set, points_last_set, advance_per_group, min_age, max_age, contact_info)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       s.name,
@@ -189,6 +191,7 @@ export function createTournament(s: TournamentSettings): number {
       s.advancePerGroup,
       s.minAge ?? null,
       s.maxAge ?? null,
+      s.contactInfo ?? null,
     );
   return Number(res.lastInsertRowid);
 }
@@ -198,7 +201,7 @@ export function updateTournament(id: number, s: TournamentSettings): void {
   db.prepare(
     `UPDATE tournaments SET name = ?, year = ?, team_size = ?, format = ?,
      best_of = ?, points_per_set = ?, points_last_set = ?, advance_per_group = ?,
-     min_age = ?, max_age = ?
+     min_age = ?, max_age = ?, contact_info = ?
      WHERE id = ?`,
   ).run(
     s.name,
@@ -211,12 +214,53 @@ export function updateTournament(id: number, s: TournamentSettings): void {
     s.advancePerGroup,
     s.minAge ?? null,
     s.maxAge ?? null,
+    s.contactInfo ?? null,
     id,
   );
 }
 
 export function setTournamentStatus(id: number, status: TournamentStatus): void {
   db.prepare("UPDATE tournaments SET status = ? WHERE id = ?").run(status, id);
+}
+
+// ---------------------------------------------------------------------------
+// Locandina
+// ---------------------------------------------------------------------------
+
+export interface Poster {
+  data: Buffer;
+  mime: string;
+}
+
+// La rotta /locandina è pubblica e il BLOB può pesare fino a 2MB: la cache
+// in-process evita una lettura SQLite sincrona per ogni richiesta. Corretta
+// perché il servizio gira con una sola istanza (vedi deploy/README.md).
+const posterCache = new Map<number, Poster | undefined>();
+
+export function setPoster(tournamentId: number, poster: Poster): void {
+  db.prepare(
+    `INSERT INTO tournament_posters (tournament_id, data, mime)
+     VALUES (?, ?, ?)
+     ON CONFLICT(tournament_id) DO UPDATE SET data = excluded.data, mime = excluded.mime`,
+  ).run(tournamentId, poster.data, poster.mime);
+  posterCache.set(tournamentId, poster);
+}
+
+export function getPoster(tournamentId: number): Poster | undefined {
+  if (posterCache.has(tournamentId)) return posterCache.get(tournamentId);
+  const poster = db
+    .prepare("SELECT data, mime FROM tournament_posters WHERE tournament_id = ?")
+    .get(tournamentId) as Poster | undefined;
+  posterCache.set(tournamentId, poster);
+  return poster;
+}
+
+export function hasPoster(tournamentId: number): boolean {
+  return (
+    db
+      .prepare("SELECT 1 FROM tournament_posters WHERE tournament_id = ?")
+      .get(tournamentId) !== undefined
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -262,7 +306,7 @@ export function registerTeam(
   if (valid.length > t.team_size + 2)
     throw new Error(`Al massimo ${t.team_size + 2} giocatori (riserve incluse)`);
   if (!valid.some((p) => p.gender === "F"))
-    throw new Error("Ogni squadra deve avere almeno una ragazza");
+    throw new Error("Ogni squadra deve avere almeno una donna");
 
   const dup = db
     .prepare(
@@ -494,6 +538,16 @@ export function generateTeamsFromSingles(tournamentId: number): {
     return { created: teams.length, reserves: reserves.length };
   });
   return tx();
+}
+
+export function updateTeamContact(teamId: number, contact: string): void {
+  const phone = checkContact(contact);
+  db.prepare("UPDATE teams SET contact = ? WHERE id = ?").run(phone, teamId);
+}
+
+export function updatePlayerContact(playerId: number, contact: string): void {
+  const phone = checkContact(contact);
+  db.prepare("UPDATE players SET contact = ? WHERE id = ?").run(phone, playerId);
 }
 
 export function movePlayer(playerId: number, teamId: number | null): void {

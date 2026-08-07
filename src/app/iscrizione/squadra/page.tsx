@@ -38,7 +38,7 @@ export default async function RegisterTeamPage({
       <h1 className="text-2xl font-bold">Iscrivi la tua squadra</h1>
       <p className="mt-1 mb-6 text-stone-600">
         Squadre da {tournament.team_size} giocatori (più fino a 2 riserve).{" "}
-        <strong>Almeno una ragazza per squadra!</strong>
+        <strong>Almeno una donna per squadra!</strong>
         {ageReq && (
           <>
             {" "}
@@ -52,6 +52,13 @@ export default async function RegisterTeamPage({
         error={params.error ?? null}
         okMessage="Squadra iscritta! L'organizzatore la confermerà a breve."
       />
+
+      {tournament.contact_info && (
+        <p className="mb-4 whitespace-pre-line text-sm text-stone-600">
+          <span className="font-medium">Per info:</span>{" "}
+          {tournament.contact_info}
+        </p>
+      )}
 
       <form
         action={registerTeamAction}
@@ -112,8 +119,8 @@ export default async function RegisterTeamPage({
                 className={`${inputCls} w-auto`}
                 defaultValue={i === 0 ? "F" : "M"}
               >
-                <option value="F">Ragazza</option>
-                <option value="M">Ragazzo</option>
+                <option value="F">Donna</option>
+                <option value="M">Uomo</option>
               </select>
             </div>
           ))}

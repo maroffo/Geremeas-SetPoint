@@ -53,6 +53,13 @@ export default async function RegisterSinglePage({
         okMessage="Iscrizione registrata! Ti assegneremo a una squadra prima dell'inizio del torneo."
       />
 
+      {tournament.contact_info && (
+        <p className="mb-4 whitespace-pre-line text-sm text-stone-600">
+          <span className="font-medium">Per info:</span>{" "}
+          {tournament.contact_info}
+        </p>
+      )}
+
       <form
         action={registerSingleAction}
         className="space-y-4 rounded-xl border border-stone-200 bg-white p-5 shadow-sm"
@@ -69,8 +76,8 @@ export default async function RegisterSinglePage({
           <div>
             <label className="mb-1 block text-sm font-medium">Sei... *</label>
             <select name="gender" className={inputCls} required>
-              <option value="M">Ragazzo</option>
-              <option value="F">Ragazza</option>
+              <option value="M">Uomo</option>
+              <option value="F">Donna</option>
             </select>
           </div>
           <div>

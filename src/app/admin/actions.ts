@@ -11,8 +11,11 @@ function errorMessage(e: unknown): string {
 }
 
 function done(back: string, error: string | null): never {
+  // back arriva da campi hidden: si accettano solo path interni,
+  // mai URL assoluti (open redirect).
+  const safeBack = back.startsWith("/") && !back.startsWith("//") ? back : "/admin";
   revalidatePath("/");
-  redirect(error ? `${back}?error=${encodeURIComponent(error)}` : back);
+  redirect(error ? `${safeBack}?error=${encodeURIComponent(error)}` : safeBack);
 }
 
 // ---------------------------------------------------------------------------
@@ -51,14 +54,31 @@ function settingsFromForm(formData: FormData): repo.TournamentSettings {
     advancePerGroup: Number(formData.get("advancePerGroup") ?? 2),
     minAge: optionalAge(formData, "minAge"),
     maxAge: optionalAge(formData, "maxAge"),
+    contactInfo: String(formData.get("contactInfo") ?? "").trim() || null,
   };
+}
+
+const POSTER_MAX_BYTES = 2 * 1024 * 1024;
+const POSTER_MIMES = new Set(["image/jpeg", "image/png", "image/webp"]);
+
+/** Legge la locandina dal form; null se non è stato scelto un file. */
+async function posterFromForm(formData: FormData): Promise<repo.Poster | null> {
+  const file = formData.get("poster");
+  if (!(file instanceof File) || file.size === 0) return null;
+  if (!POSTER_MIMES.has(file.type))
+    throw new Error("La locandina deve essere JPEG, PNG o WebP");
+  if (file.size > POSTER_MAX_BYTES)
+    throw new Error("La locandina non può superare i 2MB");
+  return { data: Buffer.from(await file.arrayBuffer()), mime: file.type };
 }
 
 export async function createTournamentAction(formData: FormData): Promise<void> {
   await requireAdmin();
   let error: string | null = null;
   try {
-    repo.createTournament(settingsFromForm(formData));
+    const poster = await posterFromForm(formData);
+    const id = repo.createTournament(settingsFromForm(formData));
+    if (poster) repo.setPoster(id, poster);
   } catch (e) {
     error = errorMessage(e);
   }
@@ -70,11 +90,41 @@ export async function updateTournamentAction(formData: FormData): Promise<void> 
   const id = Number(formData.get("tournamentId"));
   let error: string | null = null;
   try {
+    const poster = await posterFromForm(formData);
     repo.updateTournament(id, settingsFromForm(formData));
+    if (poster) repo.setPoster(id, poster);
   } catch (e) {
     error = errorMessage(e);
   }
   done("/admin", error);
+}
+
+export async function updateTeamContactAction(formData: FormData): Promise<void> {
+  await requireAdmin();
+  const teamId = Number(formData.get("teamId"));
+  const back = String(formData.get("back") ?? "/admin/iscrizioni");
+  let error: string | null = null;
+  try {
+    repo.updateTeamContact(teamId, String(formData.get("contact") ?? ""));
+  } catch (e) {
+    error = errorMessage(e);
+  }
+  done(back, error);
+}
+
+export async function updatePlayerContactAction(
+  formData: FormData,
+): Promise<void> {
+  await requireAdmin();
+  const playerId = Number(formData.get("playerId"));
+  const back = String(formData.get("back") ?? "/admin/iscrizioni");
+  let error: string | null = null;
+  try {
+    repo.updatePlayerContact(playerId, String(formData.get("contact") ?? ""));
+  } catch (e) {
+    error = errorMessage(e);
+  }
+  done(back, error);
 }
 
 export async function setStatusAction(formData: FormData): Promise<void> {

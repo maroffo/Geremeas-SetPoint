@@ -39,7 +39,7 @@ describe("flusso completo del torneo", () => {
   it("rifiuta squadre senza ragazze", () => {
     expect(() =>
       repo.registerTeam(tournamentId, "Solo Maschi", "3330000000", fourPlayers(0)),
-    ).toThrow(/ragazza/i);
+    ).toThrow(/donna/i);
   });
 
   it("iscrive squadre valide", () => {
@@ -81,7 +81,7 @@ describe("flusso completo del torneo", () => {
     expect(reserves).toBe(0);
     expect(repo.listActiveTeams(tournamentId)).toHaveLength(6);
 
-    // Ogni squadra generata ha una ragazza
+    // Ogni squadra generata ha una donna
     for (const team of repo.listActiveTeams(tournamentId)) {
       const players = repo.teamPlayers(team.id);
       expect(players.some((p) => p.gender === "F")).toBe(true);

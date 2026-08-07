@@ -3,6 +3,7 @@ import { btnPrimary, Card, inputCls } from "@/components/ui";
 import { requireAdmin } from "@/lib/auth";
 import {
   getActiveTournament,
+  hasPoster,
   listTeams,
   listUnassignedSingles,
   type TournamentRow,
@@ -22,7 +23,13 @@ const STATUS_LABELS: Record<string, string> = {
   finished: "Concluso",
 };
 
-function SettingsForm({ tournament }: { tournament: TournamentRow | null }) {
+function SettingsForm({
+  tournament,
+  posterUploaded,
+}: {
+  tournament: TournamentRow | null;
+  posterUploaded: boolean;
+}) {
   const t = tournament;
   return (
     <form
@@ -160,6 +167,39 @@ function SettingsForm({ tournament }: { tournament: TournamentRow | null }) {
           ))}
         </select>
       </div>
+      <div className="sm:col-span-2">
+        <label className="mb-1 block text-sm font-medium">
+          Contatti per gli iscritti (mostrati sul sito)
+        </label>
+        <textarea
+          name="contactInfo"
+          rows={2}
+          maxLength={500}
+          placeholder={"Laura 348 8804992\nManuel 328 6267017"}
+          defaultValue={t?.contact_info ?? ""}
+          className={`${inputCls} w-full`}
+        />
+      </div>
+      <div className="sm:col-span-2">
+        <label className="mb-1 block text-sm font-medium">
+          Locandina (JPEG/PNG/WebP, max 2MB)
+          {posterUploaded && (
+            <span className="ml-2 font-normal text-emerald-700">
+              ✓ caricata,{" "}
+              <a href="/locandina" target="_blank" className="underline">
+                vedi
+              </a>{" "}
+              (scegli un file per sostituirla)
+            </span>
+          )}
+        </label>
+        <input
+          name="poster"
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          className="block w-full text-sm text-stone-600"
+        />
+      </div>
       <div className="flex items-end">
         <button className={btnPrimary}>
           {t ? "Salva impostazioni" : "Crea torneo"}
@@ -240,7 +280,10 @@ export default async function AdminDashboard({
             : "Crea l'edizione di quest'anno"
         }
       >
-        <SettingsForm tournament={tournament} />
+        <SettingsForm
+          tournament={tournament}
+          posterUploaded={tournament ? hasPoster(tournament.id) : false}
+        />
         {tournament && tournament.status !== "registration" && (
           <p className="mt-3 text-xs text-stone-500">
             Attenzione: cambiare formato o regole a torneo avviato non modifica
