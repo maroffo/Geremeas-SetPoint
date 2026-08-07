@@ -1,13 +1,18 @@
+import Link from "next/link";
 import type { StandingRow } from "@/lib/standings";
 
 export function StandingsTable({
   standings,
   teamNames,
   highlight = 0,
+  linkTeams = false,
 }: {
   standings: StandingRow[];
   teamNames: Map<number, string>;
   highlight?: number; // quante posizioni evidenziare (qualificate)
+  // Solo nelle pagine pubbliche: in classifica ci sono le squadre attive del
+  // torneo in corso, cioè esattamente quelle con una pagina raggiungibile.
+  linkTeams?: boolean;
 }) {
   return (
     <div className="overflow-x-auto">
@@ -46,7 +51,16 @@ export function StandingsTable({
             >
               <td className="py-1.5 pr-2 text-stone-500">{i + 1}</td>
               <td className="py-1.5 pr-2">
-                {teamNames.get(row.teamId) ?? "?"}
+                {linkTeams ? (
+                  <Link
+                    href={`/squadra/${row.teamId}`}
+                    className="text-sky-700 hover:underline"
+                  >
+                    {teamNames.get(row.teamId) ?? "?"}
+                  </Link>
+                ) : (
+                  (teamNames.get(row.teamId) ?? "?")
+                )}
               </td>
               <td className="py-1.5 px-2 text-center font-semibold">
                 {row.points}

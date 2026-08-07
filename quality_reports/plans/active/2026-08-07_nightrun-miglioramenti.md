@@ -58,7 +58,7 @@ Append-only after this point. The implementing session does NOT relitigate; exec
 ### W2 - quick win pubblici (deploy A a fine W2)
 - [x] W2.1 Componente ContactLinks: parse dei numeri italiani in contact_info (riuso della logica permissiva di validation.ts), render come link wa.me (numero E.164 con +39 default) e tel:; righe non-numero restano testo. Sostituisce i render in src/app/page.tsx e nelle due pagine iscrizione. Test unit sul parser.
 - [x] W2.2 AutoRefresh client component (decisione 7): mount in home e pagina squadra; nessun refresh se tab nascosto o refresh precedente in volo.
-- [ ] W2.3 `/squadra/[id]` (decisione 1): repo `getTeamPublicView(teamId)` che applica lo scoping in query; pagina con partite della squadra + classifica girone; link dalle liste squadre in home. Test repo: 404-path (torneo vecchio, withdrawn, pending), niente campi sensibili nel payload.
+- [x] W2.3 `/squadra/[id]` (decisione 1): repo `getTeamPublicView(teamId)` che applica lo scoping in query; pagina con partite della squadra + classifica girone; link dalle liste squadre in home. Test repo: 404-path (torneo vecchio, withdrawn, pending), niente campi sensibili nel payload.
 - [ ] W2.4 Deploy A + verifica prod (home, una pagina squadra, link wa.me).
 
 ### W3 - riposo scheduler (deploy B con W5)
@@ -132,7 +132,8 @@ La matrice è l'unione di: (superfici nuove del run) × (happy path + il loro ed
 ## Progress
 - [x] Analysis + second opinion + plan (2026-08-07, planning session; Claude isolato 401, sintesi Gemini+DeepSeek)
 - [x] W0-W1 bugfix propagazione (2026-08-07: test RED→GREEN, `npm test` 97/97, `tsc --noEmit` pulito)
-- [ ] W2 quick win + deploy A
+- [x] W2.1-W2.3 quick win pubblici (2026-08-07: `npm test` 113/113, `tsc --noEmit` pulito, probe HTTP sul server standalone verde)
+- [ ] W2.4 deploy A
 - [ ] W3 riposo scheduler
 - [ ] W4 sessioni+ruoli + deploy C
 - [ ] W5 riempi-buchi/timezone + deploy B
@@ -184,6 +185,19 @@ Sorpresa rispetto all'analisi: la finalina 3º/4º **esiste** (`generateKnockout
 
 Trappola d'ambiente per le sessioni successive: in un worktree fresco `npx tsc --noEmit` fallisce con `src/app/layout.tsx(10,50): error TS2304: Cannot find name 'LayoutProps'`. Non è codice rotto: `LayoutProps` è un tipo globale generato da Next in `.next/types/**`, incluso da tsconfig.json:29. Si risolve con `npx next typegen` (o un qualsiasi build/dev) prima di `make check`.
 
+### W2 quick win (2026-08-07)
+
+La pagina squadra era **irraggiungibile durante il torneo**. Il probe HTTP sul server standalone (DB seedato, quindi torneo in stato `groups`) è fallito su `home senza link alla pagina squadra`: le liste squadre della home stanno dentro `tournament.status === "registration"`, e a torneo iniziato spariscono. L'unico elenco di squadre che resta visibile nei giorni di gara è la classifica dei gironi. Rimediato con una prop opzionale `linkTeams` su `StandingsTable` (attiva su home e pagina squadra, non in admin): in classifica ci sono per costruzione le squadre attive del torneo in corso, cioè esattamente quelle con una pagina che risponde 200.
+
+Evidenza (probe con seed + `contact_info` di prova, `.next/standalone`):
+
+```
+squadra sotto test: 4
+PROBE OK: squadra 4 200 e pulita, 404 su id inesistente/non numerico, link wa.me e tel in home
+```
+
+Il probe verifica anche il vincolo di sicurezza sull'HTML servito, non solo sul payload: nessuna occorrenza di `skill`, `age_confirmed`, `contact` né di un numero di telefono nella pagina squadra.
+
 ## Decisions
 (append-only; execution-time decisions land here)
 
@@ -196,6 +210,10 @@ Trappola d'ambiente per le sessioni successive: in un worktree fresco `npx tsc -
 | 17 | (W2.1) Candidato che `validatePhone` rifiuta | resta testo puro, nessun tentativo di spezzarlo in sotto-numeri | spezzare una sequenza ambigua produce link sbagliati, cioè peggio del testo non linkato | si vedono contatti reali con due numeri separati solo da spazi |
 | 18 | (W2.1) Normalizzazione E.164 | senza prefisso si assume `+39`; `00` iniziale vale come `+`; con `+` il prefisso resta quello scritto | il torneo è locale, i contatti sono italiani salvo eccezioni scritte per esteso | il torneo apre a iscritti esteri con numeri scritti senza prefisso |
 | 19 | (W2.2) Come si sa che un refresh è "in volo" | `useTransition`: `router.refresh()` non ritorna una promise, quindi l'unico segnale è `isPending`, copiato in un ref da un effect | il flag non viene mai alzato a mano: un refresh che finisce all'istante lascerebbe il ref bloccato su true e ucciderebbe l'auto-refresh per sempre | `router.refresh()` diventa awaitable |
+| 20 | (W2.3) Dove sta lo scoping della pagina squadra | nella query: `WHERE id = ? AND tournament_id = ? AND status = 'active'`, con l'id del torneo da `getActiveTournament()`; nessun controllo nel chiamante | un filtro applicato dopo la SELECT si dimentica: qui la riga non viene proprio letta se non è in ambito | si introduce una pagina per le edizioni passate (W6), che avrà una funzione sua |
+| 21 | (W2.3) Come si evita di esporre i campi sensibili | le colonne pubbliche sono elencate nella SELECT dei giocatori (niente `SELECT *`) e il payload è rimappato a `firstName/lastName/gender` | doppia barriera: anche aggiungendo domani una colonna sensibile a `players`, non finisce nella vista | il payload cresce fino a giustificare un tipo condiviso con le altre viste |
+| 22 | (W2.3) Link alle pagine squadra | oltre alla lista in home (visibile solo in fase iscrizioni) anche i nomi in classifica, via prop `linkTeams` di `StandingsTable`; admin invariato | senza questo la pagina è irraggiungibile proprio nei giorni di gara (vedi Surprises W2) | si aggiungono QR/short-link (follow-up W9.2b) |
+| 23 | (W2.3) Id non canonici nell'URL | `/^\d+$/` sul segmento: `1e1` o ` 10` danno 404, non la squadra 10 | lo scoping regge comunque, ma un record non deve avere infiniti URL | si introducono slug al posto degli id |
 
 ## Outcomes & Retrospective
 (fill at close)

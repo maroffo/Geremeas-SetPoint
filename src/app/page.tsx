@@ -178,6 +178,7 @@ export default function HomePage() {
               <StandingsTable
                 standings={g.standings}
                 teamNames={view.teamNames}
+                linkTeams
                 highlight={
                   tournament.format === "groups_only"
                     ? 0
@@ -207,7 +208,15 @@ export default function HomePage() {
             ) : (
               <ul className="space-y-1 text-sm">
                 {activeTeams.map((t) => (
-                  <li key={t.id}>✅ {t.name}</li>
+                  <li key={t.id}>
+                    ✅{" "}
+                    <Link
+                      href={`/squadra/${t.id}`}
+                      className="font-medium text-sky-700 hover:underline"
+                    >
+                      {t.name}
+                    </Link>
+                  </li>
                 ))}
                 {pendingTeams.map((t) => (
                   <li key={t.id} className="text-stone-500">

@@ -1290,3 +1290,122 @@ export function podium(tournamentId: number): Podium {
       : null;
   return { first, second, third: third?.winner ?? null };
 }
+
+// ---------------------------------------------------------------------------
+// Vista pubblica della squadra
+// ---------------------------------------------------------------------------
+
+export interface PublicPlayer {
+  firstName: string;
+  lastName: string;
+  gender: Gender;
+}
+
+/** Partita nella forma attesa dai componenti pubblici (compatibile con MatchView). */
+export interface PublicMatch extends MatchRow {
+  sets: SetScoreRow[];
+  teamAName: string;
+  teamBName: string;
+}
+
+export interface PublicStanding extends StandingRow {
+  teamName: string;
+}
+
+export interface TeamPublicView {
+  teamId: number;
+  teamName: string;
+  tournamentName: string;
+  tournamentYear: number;
+  players: PublicPlayer[];
+  matches: PublicMatch[];
+  group: { name: string; standings: PublicStanding[] } | null;
+}
+
+/**
+ * Vista pubblica di una squadra: null se la squadra non è una squadra
+ * confermata del torneo in corso (edizione passata, ritirata o in attesa di
+ * conferma), così la pagina può rispondere 404 senza altri controlli.
+ *
+ * Il payload contiene solo dati da tabellone: nome squadra, nomi e genere dei
+ * giocatori, partite e classifica. `skill`, `contact` e `age_confirmed` non
+ * vengono nemmeno letti dal DB.
+ */
+export function getTeamPublicView(teamId: number): TeamPublicView | null {
+  const tournament = getActiveTournament();
+  if (!tournament) return null;
+
+  // Lo scoping sta nella query, non nel chiamante: torneo attivo E stato attivo.
+  const team = db
+    .prepare(
+      `SELECT id, name, group_id FROM teams
+       WHERE id = ? AND tournament_id = ? AND status = 'active'`,
+    )
+    .get(teamId, tournament.id) as
+    | { id: number; name: string; group_id: number | null }
+    | undefined;
+  if (!team) return null;
+
+  const players = db
+    .prepare(
+      `SELECT first_name, last_name, gender FROM players
+       WHERE team_id = ? ORDER BY is_reserve, last_name, first_name`,
+    )
+    .all(team.id) as Pick<
+    PlayerRow,
+    "first_name" | "last_name" | "gender"
+  >[];
+
+  const names = new Map<number, string>();
+  for (const t of db
+    .prepare("SELECT id, name FROM teams WHERE tournament_id = ?")
+    .all(tournament.id) as { id: number; name: string }[]) {
+    names.set(t.id, t.name);
+  }
+
+  const sets = allSets(tournament.id);
+  const matches = (
+    db
+      .prepare(
+        `SELECT * FROM matches
+         WHERE tournament_id = ? AND (team_a = ? OR team_b = ?)
+         ORDER BY phase = 'knockout', round, bracket_pos, id`,
+      )
+      .all(tournament.id, team.id, team.id) as MatchRow[]
+  ).map((m) => ({
+    ...m,
+    sets: sets.get(m.id) ?? [],
+    teamAName: m.team_a !== null ? (names.get(m.team_a) ?? "?") : "—",
+    teamBName: m.team_b !== null ? (names.get(m.team_b) ?? "?") : "—",
+  }));
+
+  let group: TeamPublicView["group"] = null;
+  if (team.group_id !== null) {
+    const row = db
+      .prepare("SELECT name FROM groups WHERE id = ?")
+      .get(team.group_id) as { name: string } | undefined;
+    if (row) {
+      group = {
+        name: row.name,
+        standings: groupStandings(team.group_id).map((s) => ({
+          ...s,
+          teamName: names.get(s.teamId) ?? "?",
+        })),
+      };
+    }
+  }
+
+  return {
+    teamId: team.id,
+    teamName: team.name,
+    tournamentName: tournament.name,
+    tournamentYear: tournament.year,
+    players: players.map((p) => ({
+      firstName: p.first_name,
+      lastName: p.last_name,
+      gender: p.gender,
+    })),
+    matches,
+    group,
+  };
+}
