@@ -1,5 +1,6 @@
 import { FormMessages } from "@/components/FormMessages";
 import { getActiveTournament } from "@/lib/repo";
+import { agePhrase } from "@/lib/validation";
 import { registerTeamAction } from "../actions";
 
 export const dynamic = "force-dynamic";
@@ -27,13 +28,23 @@ export default async function RegisterTeamPage({
   }
 
   const rows = tournament.team_size + 2;
+  const ageReq = agePhrase({
+    minAge: tournament.min_age,
+    maxAge: tournament.max_age,
+  });
 
   return (
     <div className="mx-auto max-w-2xl">
       <h1 className="text-2xl font-bold">Iscrivi la tua squadra</h1>
       <p className="mt-1 mb-6 text-stone-600">
         Squadre da {tournament.team_size} giocatori (più fino a 2 riserve).{" "}
-        <strong>Almeno una ragazza per squadra!</strong>
+        <strong>Almeno una donna per squadra!</strong>
+        {ageReq && (
+          <>
+            {" "}
+            <strong>Torneo riservato a chi ha {ageReq}.</strong>
+          </>
+        )}
       </p>
 
       <FormMessages
@@ -41,6 +52,13 @@ export default async function RegisterTeamPage({
         error={params.error ?? null}
         okMessage="Squadra iscritta! L'organizzatore la confermerà a breve."
       />
+
+      {tournament.contact_info && (
+        <p className="mb-4 whitespace-pre-line text-sm text-stone-600">
+          <span className="font-medium">Per info:</span>{" "}
+          {tournament.contact_info}
+        </p>
+      )}
 
       <form
         action={registerTeamAction}
@@ -61,12 +79,14 @@ export default async function RegisterTeamPage({
           </div>
           <div>
             <label className="mb-1 block text-sm font-medium">
-              Contatto capitano (telefono/email) *
+              Telefono capitano *
             </label>
             <input
               name="contact"
+              type="tel"
+              inputMode="tel"
               required
-              maxLength={80}
+              maxLength={20}
               className={inputCls}
               placeholder="333 1234567"
             />
@@ -99,12 +119,28 @@ export default async function RegisterTeamPage({
                 className={`${inputCls} w-auto`}
                 defaultValue={i === 0 ? "F" : "M"}
               >
-                <option value="F">Ragazza</option>
-                <option value="M">Ragazzo</option>
+                <option value="F">Donna</option>
+                <option value="M">Uomo</option>
               </select>
             </div>
           ))}
         </div>
+
+        {ageReq && (
+          <label className="flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              name="ageConfirmed"
+              value="1"
+              required
+              className="mt-0.5"
+            />
+            <span>
+              Dichiaro che tutti i componenti della squadra, riserve incluse,
+              hanno {ageReq}. *
+            </span>
+          </label>
+        )}
 
         <button
           type="submit"

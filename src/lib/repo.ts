@@ -10,6 +10,7 @@ import { roundRobin } from "./roundRobin";
 import { validateMatchScore } from "./score";
 import { computeStandings, type StandingRow } from "./standings";
 import { generateBalancedTeams } from "./teamGenerator";
+import { agePhrase, validatePhone } from "./validation";
 import type {
   Gender,
   PersonInput,
@@ -29,6 +30,9 @@ export interface TournamentRow {
   points_per_set: number;
   points_last_set: number;
   advance_per_group: number;
+  min_age: number | null;
+  max_age: number | null;
+  contact_info: string | null;
   status: TournamentStatus;
 }
 
@@ -40,6 +44,11 @@ export interface TeamRow {
   status: "pending" | "active" | "withdrawn";
   contact: string | null;
   group_id: number | null;
+  /**
+   * 0/1. Riepilogo per squadra della dichiarazione d'età; la fonte
+   * autoritativa è players.age_confirmed (vale per ogni origine).
+   */
+  age_confirmed: number;
 }
 
 export interface PlayerRow {
@@ -52,6 +61,8 @@ export interface PlayerRow {
   contact: string | null;
   team_id: number | null;
   is_reserve: number;
+  /** 0/1. Fonte autoritativa della dichiarazione d'età del giocatore. */
+  age_confirmed: number;
 }
 
 export interface GroupRow {
@@ -144,14 +155,30 @@ export interface TournamentSettings {
   pointsPerSet: number;
   pointsLastSet: number;
   advancePerGroup: number;
+  minAge?: number | null;
+  maxAge?: number | null;
+  contactInfo?: string | null;
+}
+
+function checkAgeBounds(s: TournamentSettings): void {
+  for (const [label, v] of [
+    ["minima", s.minAge],
+    ["massima", s.maxAge],
+  ] as const) {
+    if (v != null && (!Number.isInteger(v) || v < 1 || v > 120))
+      throw new Error(`Età ${label} non valida`);
+  }
+  if (s.minAge != null && s.maxAge != null && s.minAge > s.maxAge)
+    throw new Error("L'età minima non può superare la massima");
 }
 
 export function createTournament(s: TournamentSettings): number {
+  checkAgeBounds(s);
   const res = db
     .prepare(
       `INSERT INTO tournaments
-       (name, year, team_size, format, best_of, points_per_set, points_last_set, advance_per_group)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+       (name, year, team_size, format, best_of, points_per_set, points_last_set, advance_per_group, min_age, max_age, contact_info)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       s.name,
@@ -162,14 +189,19 @@ export function createTournament(s: TournamentSettings): number {
       s.pointsPerSet,
       s.pointsLastSet,
       s.advancePerGroup,
+      s.minAge ?? null,
+      s.maxAge ?? null,
+      s.contactInfo ?? null,
     );
   return Number(res.lastInsertRowid);
 }
 
 export function updateTournament(id: number, s: TournamentSettings): void {
+  checkAgeBounds(s);
   db.prepare(
     `UPDATE tournaments SET name = ?, year = ?, team_size = ?, format = ?,
-     best_of = ?, points_per_set = ?, points_last_set = ?, advance_per_group = ?
+     best_of = ?, points_per_set = ?, points_last_set = ?, advance_per_group = ?,
+     min_age = ?, max_age = ?, contact_info = ?
      WHERE id = ?`,
   ).run(
     s.name,
@@ -180,6 +212,9 @@ export function updateTournament(id: number, s: TournamentSettings): void {
     s.pointsPerSet,
     s.pointsLastSet,
     s.advancePerGroup,
+    s.minAge ?? null,
+    s.maxAge ?? null,
+    s.contactInfo ?? null,
     id,
   );
 }
@@ -189,19 +224,76 @@ export function setTournamentStatus(id: number, status: TournamentStatus): void 
 }
 
 // ---------------------------------------------------------------------------
+// Locandina
+// ---------------------------------------------------------------------------
+
+export interface Poster {
+  data: Buffer;
+  mime: string;
+}
+
+// La rotta /locandina è pubblica e il BLOB può pesare fino a 2MB: la cache
+// in-process evita una lettura SQLite sincrona per ogni richiesta. Corretta
+// perché il servizio gira con una sola istanza (vedi deploy/README.md).
+const posterCache = new Map<number, Poster | undefined>();
+
+export function setPoster(tournamentId: number, poster: Poster): void {
+  db.prepare(
+    `INSERT INTO tournament_posters (tournament_id, data, mime)
+     VALUES (?, ?, ?)
+     ON CONFLICT(tournament_id) DO UPDATE SET data = excluded.data, mime = excluded.mime`,
+  ).run(tournamentId, poster.data, poster.mime);
+  posterCache.set(tournamentId, poster);
+}
+
+export function getPoster(tournamentId: number): Poster | undefined {
+  if (posterCache.has(tournamentId)) return posterCache.get(tournamentId);
+  const poster = db
+    .prepare("SELECT data, mime FROM tournament_posters WHERE tournament_id = ?")
+    .get(tournamentId) as Poster | undefined;
+  posterCache.set(tournamentId, poster);
+  return poster;
+}
+
+export function hasPoster(tournamentId: number): boolean {
+  return (
+    db
+      .prepare("SELECT 1 FROM tournament_posters WHERE tournament_id = ?")
+      .get(tournamentId) !== undefined
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Iscrizioni
 // ---------------------------------------------------------------------------
+
+function checkAgeDeclaration(t: TournamentRow, ageConfirmed: boolean): void {
+  const phrase = agePhrase({ minAge: t.min_age, maxAge: t.max_age });
+  if (phrase && !ageConfirmed)
+    throw new Error(
+      `Questo torneo richiede ${phrase}: conferma il requisito d'età`,
+    );
+}
+
+function checkContact(contact: string): string {
+  const phone = validatePhone(contact);
+  if (!phone) throw new Error("Indica un numero di telefono valido");
+  return phone;
+}
 
 export function registerTeam(
   tournamentId: number,
   teamName: string,
   contact: string,
   people: PersonInput[],
+  ageConfirmed = false,
 ): number {
   const t = getTournament(tournamentId);
   if (!t) throw new Error("Torneo non trovato");
   if (t.status !== "registration")
     throw new Error("Le iscrizioni sono chiuse");
+  checkAgeDeclaration(t, ageConfirmed);
+  const phone = checkContact(contact);
 
   const name = teamName.trim();
   if (!name) throw new Error("Indica il nome della squadra");
@@ -214,7 +306,7 @@ export function registerTeam(
   if (valid.length > t.team_size + 2)
     throw new Error(`Al massimo ${t.team_size + 2} giocatori (riserve incluse)`);
   if (!valid.some((p) => p.gender === "F"))
-    throw new Error("Ogni squadra deve avere almeno una ragazza");
+    throw new Error("Ogni squadra deve avere almeno una donna");
 
   const dup = db
     .prepare(
@@ -224,16 +316,21 @@ export function registerTeam(
   if (dup) throw new Error("Esiste già una squadra con questo nome");
 
   const insertTeam = db.prepare(
-    `INSERT INTO teams (tournament_id, name, origin, status, contact)
-     VALUES (?, ?, 'registered', 'pending', ?)`,
+    `INSERT INTO teams (tournament_id, name, origin, status, contact, age_confirmed)
+     VALUES (?, ?, 'registered', 'pending', ?, ?)`,
   );
   const insertPlayer = db.prepare(
-    `INSERT INTO players (tournament_id, first_name, last_name, gender, team_id, is_reserve)
-     VALUES (?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO players (tournament_id, first_name, last_name, gender, team_id, is_reserve, age_confirmed)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
   );
 
   const tx = db.transaction(() => {
-    const teamId = Number(insertTeam.run(tournamentId, name, contact).lastInsertRowid);
+    const teamId = Number(
+      insertTeam.run(tournamentId, name, phone, ageConfirmed ? 1 : 0)
+        .lastInsertRowid,
+    );
+    // La dichiarazione del capitano vale per tutti i componenti: si propaga
+    // ai giocatori, che restano la fonte autoritativa di age_confirmed.
     valid.forEach((p, i) => {
       insertPlayer.run(
         tournamentId,
@@ -242,6 +339,7 @@ export function registerTeam(
         p.gender,
         teamId,
         i >= t.team_size ? 1 : 0,
+        ageConfirmed ? 1 : 0,
       );
     });
     return teamId;
@@ -253,11 +351,14 @@ export function registerSingle(
   tournamentId: number,
   person: PersonInput,
   contact: string,
+  ageConfirmed = false,
 ): number {
   const t = getTournament(tournamentId);
   if (!t) throw new Error("Torneo non trovato");
   if (t.status !== "registration")
     throw new Error("Le iscrizioni sono chiuse");
+  checkAgeDeclaration(t, ageConfirmed);
+  const phone = checkContact(contact);
   if (!person.firstName.trim() || !person.lastName.trim())
     throw new Error("Nome e cognome sono obbligatori");
   const skill = person.skill ?? 0;
@@ -266,8 +367,8 @@ export function registerSingle(
 
   const res = db
     .prepare(
-      `INSERT INTO players (tournament_id, first_name, last_name, gender, skill, contact)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO players (tournament_id, first_name, last_name, gender, skill, contact, age_confirmed)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       tournamentId,
@@ -275,7 +376,8 @@ export function registerSingle(
       person.lastName.trim(),
       person.gender,
       skill,
-      contact,
+      phone,
+      ageConfirmed ? 1 : 0,
     );
   return Number(res.lastInsertRowid);
 }
@@ -385,7 +487,11 @@ export function generateTeamsFromSingles(tournamentId: number): {
       db.prepare("DELETE FROM teams WHERE id = ?").run(g.id);
     }
 
-    const singles = listUnassignedSingles(tournamentId).map((p) => ({
+    const unassigned = listUnassignedSingles(tournamentId);
+    const confirmedIds = new Set(
+      unassigned.filter((p) => p.age_confirmed === 1).map((p) => p.id),
+    );
+    const singles = unassigned.map((p) => ({
       id: p.id,
       firstName: p.first_name,
       lastName: p.last_name,
@@ -406,9 +512,11 @@ export function generateTeamsFromSingles(tournamentId: number): {
       (n) => !usedNames.has(n.toLowerCase()),
     );
 
+    // Il riepilogo di squadra riflette i componenti: confermata solo se
+    // tutti i singoli assegnati hanno dichiarato individualmente.
     const insertTeam = db.prepare(
-      `INSERT INTO teams (tournament_id, name, origin, status)
-       VALUES (?, ?, 'generated', 'active')`,
+      `INSERT INTO teams (tournament_id, name, origin, status, age_confirmed)
+       VALUES (?, ?, 'generated', 'active', ?)`,
     );
     const assign = db.prepare(
       "UPDATE players SET team_id = ?, is_reserve = 0 WHERE id = ?",
@@ -419,7 +527,10 @@ export function generateTeamsFromSingles(tournamentId: number): {
 
     teams.forEach((team, i) => {
       const name = namePool[i] ?? `Squadra ${i + 1}`;
-      const teamId = Number(insertTeam.run(tournamentId, name).lastInsertRowid);
+      const allConfirmed = team.every((pl) => confirmedIds.has(pl.id));
+      const teamId = Number(
+        insertTeam.run(tournamentId, name, allConfirmed ? 1 : 0).lastInsertRowid,
+      );
       for (const pl of team) assign.run(teamId, pl.id);
     });
     for (const pl of reserves) markReserve.run(pl.id);
@@ -427,6 +538,16 @@ export function generateTeamsFromSingles(tournamentId: number): {
     return { created: teams.length, reserves: reserves.length };
   });
   return tx();
+}
+
+export function updateTeamContact(teamId: number, contact: string): void {
+  const phone = checkContact(contact);
+  db.prepare("UPDATE teams SET contact = ? WHERE id = ?").run(phone, teamId);
+}
+
+export function updatePlayerContact(playerId: number, contact: string): void {
+  const phone = checkContact(contact);
+  db.prepare("UPDATE players SET contact = ? WHERE id = ?").run(phone, playerId);
 }
 
 export function movePlayer(playerId: number, teamId: number | null): void {

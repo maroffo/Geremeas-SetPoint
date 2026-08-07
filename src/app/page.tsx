@@ -4,9 +4,11 @@ import { MatchLine } from "@/components/MatchLine";
 import { StandingsTable } from "@/components/StandingsTable";
 import {
   getActiveTournament,
+  hasPoster,
   listTeams,
   listUnassignedSingles,
 } from "@/lib/repo";
+import { agePhrase } from "@/lib/validation";
 import { buildTournamentView, formatSchedule } from "@/lib/view";
 
 export const dynamic = "force-dynamic";
@@ -45,6 +47,11 @@ export default function HomePage() {
   }
 
   const view = buildTournamentView(tournament);
+  const ageReq = agePhrase({
+    minAge: tournament.min_age,
+    maxAge: tournament.max_age,
+  });
+  const poster = hasPoster(tournament.id);
   const teams = listTeams(tournament.id);
   const activeTeams = teams.filter((t) => t.status === "active");
   const pendingTeams = teams.filter((t) => t.status === "pending");
@@ -61,6 +68,7 @@ export default function HomePage() {
         <p className="mt-1 text-sky-100">
           Squadre {tournament.team_size}x{tournament.team_size} · al meglio di{" "}
           {tournament.best_of} set · set a {tournament.points_per_set}
+          {ageReq && ` · riservato a chi ha ${ageReq}`}
         </p>
         {tournament.status === "registration" && (
           <div className="mt-4 flex flex-wrap gap-3">
@@ -79,6 +87,29 @@ export default function HomePage() {
           </div>
         )}
       </div>
+
+      {(poster || tournament.contact_info) && (
+        <Card title="Locandina e contatti">
+          <div className="flex flex-col gap-4 sm:flex-row">
+            {poster && (
+              <a href="/locandina" target="_blank" className="shrink-0">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src="/locandina"
+                  alt={`Locandina ${tournament.name}`}
+                  className="w-full max-w-xs rounded-lg border border-stone-200 shadow-sm"
+                />
+              </a>
+            )}
+            {tournament.contact_info && (
+              <div className="whitespace-pre-line text-sm text-stone-700">
+                <div className="mb-1 font-medium">Per info e iscrizioni:</div>
+                {tournament.contact_info}
+              </div>
+            )}
+          </div>
+        </Card>
+      )}
 
       {tournament.status === "finished" && view.podium.first && (
         <Card>

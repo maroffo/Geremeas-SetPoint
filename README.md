@@ -31,19 +31,24 @@ npm install
 npm run dev        # sviluppo su http://localhost:3000
 ```
 
-Per la produzione:
+Per la produzione l'app è pensata per il deploy in container su Cloud Run
+(vedi [deploy/README.md](deploy/README.md)). Per provare in locale la build
+standalone (`next start` non funziona con `output: "standalone"`):
 
 ```bash
 npm run build
-npm run start
+cp -r .next/static .next/standalone/.next/static
+node .next/standalone/server.js
 ```
 
 ### Configurazione
 
 | Variabile | Default | Descrizione |
 |---|---|---|
-| `ADMIN_PIN` | `geremeas` | PIN di accesso al pannello `/admin` (cambialo!) |
+| `ADMIN_PIN` | `geremeas` (solo sviluppo) | PIN di accesso al pannello `/admin`. In produzione (`NODE_ENV=production`) è obbligatorio: senza, il login admin viene rifiutato |
 | `DATABASE_PATH` | `data/geremeas.db` | Percorso del database SQLite |
+
+Per il deploy su GCP Cloud Run vedi [deploy/README.md](deploy/README.md).
 
 ### Dati di prova
 

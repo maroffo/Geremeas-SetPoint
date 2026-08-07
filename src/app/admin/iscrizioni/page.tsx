@@ -7,7 +7,45 @@ import {
   listUnassignedSingles,
   teamPlayers,
 } from "@/lib/repo";
-import { deletePlayerAction, deleteTeamAction, teamStatusAction } from "../actions";
+import {
+  deletePlayerAction,
+  deleteTeamAction,
+  teamStatusAction,
+  updatePlayerContactAction,
+  updateTeamContactAction,
+} from "../actions";
+
+const contactInputCls =
+  "w-36 rounded border border-stone-300 px-2 py-1 text-xs focus:border-sky-500 focus:outline-none";
+
+function ContactEditor({
+  action,
+  idField,
+  id,
+  contact,
+}: {
+  action: (formData: FormData) => Promise<void>;
+  idField: string;
+  id: number;
+  contact: string | null;
+}) {
+  return (
+    <form action={action} className="flex items-center gap-1">
+      <input type="hidden" name={idField} value={id} />
+      <input type="hidden" name="back" value={BACK} />
+      <span aria-hidden>📞</span>
+      <input
+        name="contact"
+        type="tel"
+        defaultValue={contact ?? ""}
+        placeholder="333 1234567"
+        maxLength={32}
+        className={contactInputCls}
+      />
+      <button className="text-xs text-sky-700 hover:underline">salva</button>
+    </form>
+  );
+}
 
 export const dynamic = "force-dynamic";
 
@@ -66,11 +104,12 @@ export default async function AdminRegistrationsPage({
                         generata
                       </span>
                     )}
-                    {team.contact && (
-                      <span className="text-xs text-stone-500">
-                        📞 {team.contact}
-                      </span>
-                    )}
+                    <ContactEditor
+                      action={updateTeamContactAction}
+                      idField="teamId"
+                      id={team.id}
+                      contact={team.contact}
+                    />
                     <div className="ml-auto flex gap-2">
                       {team.status === "pending" && (
                         <form action={teamStatusAction}>
@@ -115,7 +154,7 @@ export default async function AdminRegistrationsPage({
                     ))}
                     {!players.some((p) => p.gender === "F") && (
                       <span className="text-red-600">
-                        ⚠️ manca una ragazza!
+                        ⚠️ manca una donna!
                       </span>
                     )}
                   </div>
@@ -149,10 +188,17 @@ export default async function AdminRegistrationsPage({
                       {p.first_name} {p.last_name}
                     </td>
                     <td className="py-1.5 px-2">
-                      {p.gender === "F" ? "Ragazza" : "Ragazzo"}
+                      {p.gender === "F" ? "Donna" : "Uomo"}
                     </td>
                     <td className="py-1.5 px-2">{p.skill}/10</td>
-                    <td className="py-1.5 px-2 text-stone-500">{p.contact}</td>
+                    <td className="py-1.5 px-2 text-stone-500">
+                      <ContactEditor
+                        action={updatePlayerContactAction}
+                        idField="playerId"
+                        id={p.id}
+                        contact={p.contact}
+                      />
+                    </td>
                     <td className="py-1.5 px-2">
                       {p.is_reserve ? "riserva" : "da assegnare"}
                     </td>

@@ -1,5 +1,6 @@
 import { FormMessages } from "@/components/FormMessages";
 import { getActiveTournament } from "@/lib/repo";
+import { agePhrase } from "@/lib/validation";
 import { registerSingleAction } from "../actions";
 
 export const dynamic = "force-dynamic";
@@ -26,6 +27,11 @@ export default async function RegisterSinglePage({
     );
   }
 
+  const ageReq = agePhrase({
+    minAge: tournament.min_age,
+    maxAge: tournament.max_age,
+  });
+
   return (
     <div className="mx-auto max-w-xl">
       <h1 className="text-2xl font-bold">Iscriviti come singolo</h1>
@@ -33,6 +39,12 @@ export default async function RegisterSinglePage({
         Non hai una squadra? Nessun problema: il sistema creerà squadre
         bilanciate con tutti gli iscritti singoli. Indica onestamente il tuo
         livello!
+        {ageReq && (
+          <>
+            {" "}
+            <strong>Torneo riservato a chi ha {ageReq}.</strong>
+          </>
+        )}
       </p>
 
       <FormMessages
@@ -40,6 +52,13 @@ export default async function RegisterSinglePage({
         error={params.error ?? null}
         okMessage="Iscrizione registrata! Ti assegneremo a una squadra prima dell'inizio del torneo."
       />
+
+      {tournament.contact_info && (
+        <p className="mb-4 whitespace-pre-line text-sm text-stone-600">
+          <span className="font-medium">Per info:</span>{" "}
+          {tournament.contact_info}
+        </p>
+      )}
 
       <form
         action={registerSingleAction}
@@ -57,15 +76,23 @@ export default async function RegisterSinglePage({
           <div>
             <label className="mb-1 block text-sm font-medium">Sei... *</label>
             <select name="gender" className={inputCls} required>
-              <option value="M">Ragazzo</option>
-              <option value="F">Ragazza</option>
+              <option value="M">Uomo</option>
+              <option value="F">Donna</option>
             </select>
           </div>
           <div>
             <label className="mb-1 block text-sm font-medium">
-              Contatto (telefono/email) *
+              Telefono *
             </label>
-            <input name="contact" required maxLength={80} className={inputCls} />
+            <input
+              name="contact"
+              type="tel"
+              inputMode="tel"
+              required
+              maxLength={20}
+              className={inputCls}
+              placeholder="333 1234567"
+            />
           </div>
         </div>
 
@@ -82,6 +109,19 @@ export default async function RegisterSinglePage({
             ))}
           </select>
         </div>
+
+        {ageReq && (
+          <label className="flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              name="ageConfirmed"
+              value="1"
+              required
+              className="mt-0.5"
+            />
+            <span>Dichiaro di avere {ageReq}. *</span>
+          </label>
+        )}
 
         <button
           type="submit"
