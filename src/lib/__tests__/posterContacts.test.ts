@@ -90,4 +90,52 @@ describe("modifica contatti da admin", () => {
       .find((p) => p.id === single);
     expect(found?.contact).toBe("328 6267017");
   });
+
+  it("modifica anagrafica e bravura di un singolo", () => {
+    const single = repo.registerSingle(
+      id,
+      { firstName: "Franca", lastName: "Blu", gender: "F", skill: 4 },
+      "3335554444",
+    );
+    repo.updatePlayer(single, "Francesca", "Blualto", 8, "333 555 4444");
+    const found = repo.listUnassignedSingles(id).find((p) => p.id === single)!;
+    expect(found.first_name).toBe("Francesca");
+    expect(found.last_name).toBe("Blualto");
+    expect(found.skill).toBe(8);
+    expect(found.contact).toBe("333 555 4444");
+
+    expect(() => repo.updatePlayer(single, "", "Blualto", 8, "3335554444")).toThrow(
+      /obbligatori/,
+    );
+    expect(() =>
+      repo.updatePlayer(single, "Francesca", "Blualto", 11, "3335554444"),
+    ).toThrow(/bravura/i);
+    expect(() =>
+      repo.updatePlayer(single, "Francesca", "Blualto", 8, "niente telefono"),
+    ).toThrow(/telefono/i);
+  });
+});
+
+describe("squadre create dall'admin", () => {
+  const id = repo.createTournament({ ...base, name: "Admin Teams" });
+
+  it("crea una squadra col solo nome, attiva e senza giocatori", () => {
+    const teamId = repo.createAdminTeam(id, "I Ripescati", null);
+    const team = repo.listTeams(id).find((t) => t.id === teamId)!;
+    expect(team.status).toBe("active");
+    expect(team.contact).toBeNull();
+    expect(repo.teamPlayers(teamId)).toHaveLength(0);
+  });
+
+  it("valida nome duplicato e telefono se fornito", () => {
+    expect(() => repo.createAdminTeam(id, "i ripescati", null)).toThrow(/già/);
+    expect(() => repo.createAdminTeam(id, "", null)).toThrow(/nome/);
+    expect(() => repo.createAdminTeam(id, "Con Email", "a@b.it")).toThrow(
+      /telefono/i,
+    );
+    const withPhone = repo.createAdminTeam(id, "Con Telefono", "348 8804992");
+    expect(repo.listTeams(id).find((t) => t.id === withPhone)?.contact).toBe(
+      "348 8804992",
+    );
+  });
 });

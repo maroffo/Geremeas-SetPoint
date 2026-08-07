@@ -44,7 +44,7 @@ Fix rounds 5 (default) · write agents 1 (diretto) · reviewer 2 · finalizzazio
 - [x] Note pubbliche orari indicativi
 - [x] Verify: 89/89, e2e, browser reale (calendario generato: 3 slot x 2 campi, round paralleli)
 - [x] Review architecture: 0C/2M/3m, tutti fixati (range orari, copertura knockout, dead code, riferimenti pendenti, bound condivisi)
-- [ ] Deploy
+- [x] Deploy: revision 00002 su europe-west1, setpoint.wishew.com verificato
 
 ## Surprises & Discoveries
 

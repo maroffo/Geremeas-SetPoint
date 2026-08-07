@@ -8,10 +8,11 @@ import {
   teamPlayers,
 } from "@/lib/repo";
 import {
+  createTeamAction,
   deletePlayerAction,
   deleteTeamAction,
   teamStatusAction,
-  updatePlayerContactAction,
+  updatePlayerAction,
   updateTeamContactAction,
 } from "../actions";
 
@@ -163,58 +164,101 @@ export default async function AdminRegistrationsPage({
             })}
           </div>
         )}
+        <form
+          action={createTeamAction}
+          className="mt-4 flex flex-wrap items-center gap-2 border-t border-stone-100 pt-3"
+        >
+          <input type="hidden" name="tournamentId" value={tournament.id} />
+          <input type="hidden" name="back" value={BACK} />
+          <input
+            name="teamName"
+            required
+            maxLength={40}
+            placeholder="Nome squadra"
+            className={`${contactInputCls} w-44`}
+          />
+          <input
+            name="contact"
+            type="tel"
+            maxLength={32}
+            placeholder="Telefono (opzionale)"
+            className={contactInputCls}
+          />
+          <button className={btnSecondary}>+ Crea squadra</button>
+        </form>
       </Card>
 
       <Card title={`Iscritti singoli (${singles.length})`}>
         {singles.length === 0 ? (
           <p className="text-sm text-stone-500">Nessun iscritto singolo.</p>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-stone-200 text-left text-xs uppercase text-stone-500">
-                  <th className="py-1 pr-2">Giocatore</th>
-                  <th className="py-1 px-2">Genere</th>
-                  <th className="py-1 px-2">Bravura</th>
-                  <th className="py-1 px-2">Contatto</th>
-                  <th className="py-1 px-2">Stato</th>
-                  <th className="py-1 px-2"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {singles.map((p) => (
-                  <tr key={p.id} className="border-b border-stone-100">
-                    <td className="py-1.5 pr-2">
-                      {p.first_name} {p.last_name}
-                    </td>
-                    <td className="py-1.5 px-2">
-                      {p.gender === "F" ? "Donna" : "Uomo"}
-                    </td>
-                    <td className="py-1.5 px-2">{p.skill}/10</td>
-                    <td className="py-1.5 px-2 text-stone-500">
-                      <ContactEditor
-                        action={updatePlayerContactAction}
-                        idField="playerId"
-                        id={p.id}
-                        contact={p.contact}
-                      />
-                    </td>
-                    <td className="py-1.5 px-2">
-                      {p.is_reserve ? "riserva" : "da assegnare"}
-                    </td>
-                    <td className="py-1.5 px-2">
-                      <form action={deletePlayerAction}>
-                        <input type="hidden" name="playerId" value={p.id} />
-                        <input type="hidden" name="back" value={BACK} />
-                        <button className="text-red-600 hover:underline">
-                          rimuovi
-                        </button>
-                      </form>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="divide-y divide-stone-100">
+            {singles.map((p) => (
+              <div
+                key={p.id}
+                className="flex flex-wrap items-center gap-2 py-2 text-sm"
+              >
+                <form
+                  action={updatePlayerAction}
+                  className="flex flex-wrap items-center gap-2"
+                >
+                  <input type="hidden" name="playerId" value={p.id} />
+                  <input type="hidden" name="back" value={BACK} />
+                  <input
+                    name="firstName"
+                    required
+                    maxLength={40}
+                    defaultValue={p.first_name}
+                    placeholder="Nome"
+                    className={`${contactInputCls} w-28`}
+                  />
+                  <input
+                    name="lastName"
+                    required
+                    maxLength={40}
+                    defaultValue={p.last_name}
+                    placeholder="Cognome"
+                    className={`${contactInputCls} w-28`}
+                  />
+                  <span className="text-xs text-stone-500">
+                    {p.gender === "F" ? "Donna" : "Uomo"}
+                  </span>
+                  <select
+                    name="skill"
+                    defaultValue={p.skill ?? 5}
+                    className={contactInputCls}
+                  >
+                    {Array.from({ length: 10 }, (_, i) => (
+                      <option key={i + 1} value={i + 1}>
+                        {i + 1}/10
+                      </option>
+                    ))}
+                  </select>
+                  <span aria-hidden>📞</span>
+                  <input
+                    name="contact"
+                    type="tel"
+                    defaultValue={p.contact ?? ""}
+                    placeholder="333 1234567"
+                    maxLength={32}
+                    className={contactInputCls}
+                  />
+                  <button className="text-xs text-sky-700 hover:underline">
+                    salva
+                  </button>
+                </form>
+                <span className="text-xs text-stone-500">
+                  {p.is_reserve ? "riserva" : "da assegnare"}
+                </span>
+                <form action={deletePlayerAction} className="ml-auto">
+                  <input type="hidden" name="playerId" value={p.id} />
+                  <input type="hidden" name="back" value={BACK} />
+                  <button className="text-xs text-red-600 hover:underline">
+                    rimuovi
+                  </button>
+                </form>
+              </div>
+            ))}
           </div>
         )}
       </Card>

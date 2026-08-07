@@ -178,15 +178,37 @@ export async function updateTeamContactAction(formData: FormData): Promise<void>
   done(back, error);
 }
 
-export async function updatePlayerContactAction(
-  formData: FormData,
-): Promise<void> {
+export async function updatePlayerAction(formData: FormData): Promise<void> {
   await requireAdmin();
   const playerId = Number(formData.get("playerId"));
   const back = String(formData.get("back") ?? "/admin/iscrizioni");
   let error: string | null = null;
   try {
-    repo.updatePlayerContact(playerId, String(formData.get("contact") ?? ""));
+    const rawSkill = String(formData.get("skill") ?? "").trim();
+    repo.updatePlayer(
+      playerId,
+      String(formData.get("firstName") ?? ""),
+      String(formData.get("lastName") ?? ""),
+      rawSkill ? Number(rawSkill) : null,
+      String(formData.get("contact") ?? ""),
+    );
+  } catch (e) {
+    error = errorMessage(e);
+  }
+  done(back, error);
+}
+
+export async function createTeamAction(formData: FormData): Promise<void> {
+  await requireAdmin();
+  const tournamentId = Number(formData.get("tournamentId"));
+  const back = String(formData.get("back") ?? "/admin/iscrizioni");
+  let error: string | null = null;
+  try {
+    repo.createAdminTeam(
+      tournamentId,
+      String(formData.get("teamName") ?? ""),
+      String(formData.get("contact") ?? "").trim() || null,
+    );
   } catch (e) {
     error = errorMessage(e);
   }

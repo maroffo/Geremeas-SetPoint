@@ -735,6 +735,60 @@ export function generateTeamsFromSingles(tournamentId: number): {
   return tx();
 }
 
+/** Modifica anagrafica e contatto di un iscritto singolo dal pannello admin. */
+export function updatePlayer(
+  playerId: number,
+  firstName: string,
+  lastName: string,
+  skill: number | null,
+  contact: string,
+): void {
+  const first = firstName.trim();
+  const last = lastName.trim();
+  if (!first || !last) throw new Error("Nome e cognome sono obbligatori");
+  if (skill != null && (!Number.isInteger(skill) || skill < 1 || skill > 10))
+    throw new Error("La bravura va da 1 a 10");
+  const phone = checkContact(contact);
+  const res = db
+    .prepare(
+      `UPDATE players SET first_name = ?, last_name = ?, skill = ?, contact = ?
+       WHERE id = ?`,
+    )
+    .run(first, last, skill, phone, playerId);
+  if (res.changes === 0) throw new Error("Giocatore non trovato");
+}
+
+/**
+ * Squadra creata dall'organizzatore: nasce attiva e senza giocatori
+ * (si aggiungono o spostano dopo). Il vincolo della donna in squadra resta
+ * visibile come avviso in lista, non blocca la creazione manuale.
+ */
+export function createAdminTeam(
+  tournamentId: number,
+  teamName: string,
+  contact: string | null,
+): number {
+  const t = getTournament(tournamentId);
+  if (!t) throw new Error("Torneo non trovato");
+  if (t.status === "finished") throw new Error("Il torneo è concluso");
+  const name = teamName.trim();
+  if (!name) throw new Error("Indica il nome della squadra");
+  const dup = db
+    .prepare(
+      "SELECT 1 FROM teams WHERE tournament_id = ? AND lower(name) = lower(?)",
+    )
+    .get(tournamentId, name);
+  if (dup) throw new Error("Esiste già una squadra con questo nome");
+  const phone = contact && contact.trim() ? checkContact(contact) : null;
+  const res = db
+    .prepare(
+      `INSERT INTO teams (tournament_id, name, origin, status, contact)
+       VALUES (?, ?, 'registered', 'active', ?)`,
+    )
+    .run(tournamentId, name, phone);
+  return Number(res.lastInsertRowid);
+}
+
 export function updateTeamContact(teamId: number, contact: string): void {
   const phone = checkContact(contact);
   db.prepare("UPDATE teams SET contact = ? WHERE id = ?").run(phone, teamId);
