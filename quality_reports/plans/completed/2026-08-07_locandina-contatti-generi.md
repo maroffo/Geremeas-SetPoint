@@ -40,12 +40,26 @@ Fix rounds 5 (default) · write agents 1 (diretto) · reviewer 2 · finalizzazio
 - [x] Pubblico + etichette Uomo/Donna
 - [x] Verify: 72/72, e2e, browser reale (login admin, creazione torneo con locandina vera da 540KB, home con card Locandina e contatti)
 - [x] Review security: 0C/1M/3m, tutti fixati (bodySizeLimit 3mb, nosniff, guardia open-redirect, cache poster)
-- [ ] Deploy + caricamento locandina reale in produzione
+- [x] Deploy revision 00005 + locandina reale caricata sul torneo di produzione via admin (età minima 35, contatti Laura/Manuel), verificata in home
 
 ## Surprises & Discoveries
 
-(in corso)
+- In produzione il torneo "Torneo di Geremeas over 35 2026" esisteva già, con
+  1 singolo iscritto: aggiornato quello invece di crearne uno nuovo.
+  Quell'iscritto è entrato prima del vincolo d'età, quindi ha
+  age_confirmed=0 (caso tech-debt già registrato): da verificare a mano.
+- Il tool di upload del browser accetta solo file condivisi con la sessione:
+  la locandina va copiata nella tmp del job prima dell'upload.
+- Next taglia i body delle server action a 1MB di default: qualunque
+  feature di upload deve alzare serverActions.bodySizeLimit.
 
 ## Outcomes & Retrospective
 
-(a chiusura)
+**Shipped**: locandina per torneo (BLOB SQLite replicato, upload admin con
+allowlist mime e cap 2MB, route /locandina con nosniff e cache in-process),
+info contatti torneo su home e form, edit inline dei contatti in admin
+(validazione telefonica), etichette Uomo/Donna. 5 test nuovi (72 totali).
+Verificato end-to-end in browser locale e in produzione (revision 00005).
+
+**Lezioni**: vedi Surprises; inoltre la guardia open-redirect su `back` è
+stata messa in done() così tutti i call site la ereditano.
