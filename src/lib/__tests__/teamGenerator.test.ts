@@ -47,6 +47,41 @@ describe("generateBalancedTeams", () => {
     expect(spread).toBeLessThanOrEqual(3);
   });
 
+  it("con 20 iscritti crea 5 squadre di livello simile", () => {
+    // Pool realistico: 6 donne e 14 uomini con livelli misti.
+    const players = pool([10, 9, 8, 8, 7, 6, 6, 5, 5, 4, 3, 3, 2, 1], [9, 7, 6, 5, 4, 2]);
+    const { teams, reserves } = generateBalancedTeams(players, 4);
+
+    expect(teams).toHaveLength(5);
+    expect(reserves).toHaveLength(0);
+    for (const team of teams) {
+      expect(team).toHaveLength(4);
+      expect(team.some((pl) => pl.gender === "F")).toBe(true);
+    }
+    const totals = teams.map(teamSkillTotal);
+    expect(Math.max(...totals) - Math.min(...totals)).toBeLessThanOrEqual(3);
+  });
+
+  it("resta bilanciato su pool casuali da 20 (guardia di regressione)", () => {
+    // LCG deterministico: stessi pool a ogni run, niente flakiness.
+    const lcg = (seed: number) => {
+      let s = seed;
+      return () => (s = (s * 48271) % 2147483647) / 2147483647;
+    };
+    for (let seed = 1; seed <= 100; seed++) {
+      const rnd = lcg(seed);
+      const nFem = 5 + Math.floor(rnd() * 4);
+      const players = Array.from({ length: 20 }, (_, i) =>
+        p(i < nFem ? "F" : "M", 1 + Math.floor(rnd() * 10)),
+      );
+      const { teams } = generateBalancedTeams(players, 4);
+      const totals = teams.map(teamSkillTotal);
+      // Empiricamente il greedy sta in spread ≤6 (mediana 2, p95 4 su 500
+      // pool): una regressione dell'algoritmo salterebbe ben oltre.
+      expect(Math.max(...totals) - Math.min(...totals)).toBeLessThanOrEqual(6);
+    }
+  });
+
   it("mette gli avanzi in riserva", () => {
     const players = pool([5, 5, 5, 5, 5, 5], [5, 5]);
     // 8 giocatori, squadre da 3 → 2 squadre (2 ragazze), 2 riserve
