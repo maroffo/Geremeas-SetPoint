@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Bracket } from "@/components/Bracket";
+import { ContactLinks } from "@/components/ContactLinks";
 import { MatchLine } from "@/components/MatchLine";
 import { StandingsTable } from "@/components/StandingsTable";
 import {
@@ -104,7 +105,7 @@ export default function HomePage() {
             {tournament.contact_info && (
               <div className="whitespace-pre-line text-sm text-stone-700">
                 <div className="mb-1 font-medium">Per info e iscrizioni:</div>
-                {tournament.contact_info}
+                <ContactLinks text={tournament.contact_info} />
               </div>
             )}
           </div>
