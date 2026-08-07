@@ -55,6 +55,7 @@ function settingsFromForm(formData: FormData): repo.TournamentSettings {
     minAge: optionalAge(formData, "minAge"),
     maxAge: optionalAge(formData, "maxAge"),
     contactInfo: String(formData.get("contactInfo") ?? "").trim() || null,
+    matchMinutes: Number(formData.get("matchMinutes") ?? 40),
   };
 }
 
@@ -97,6 +98,71 @@ export async function updateTournamentAction(formData: FormData): Promise<void> 
     error = errorMessage(e);
   }
   done("/admin", error);
+}
+
+export async function addDayAction(formData: FormData): Promise<void> {
+  await requireAdmin();
+  const tournamentId = Number(formData.get("tournamentId"));
+  let error: string | null = null;
+  try {
+    repo.addDay(
+      tournamentId,
+      String(formData.get("date") ?? ""),
+      String(formData.get("startTime") ?? ""),
+      String(formData.get("endTime") ?? ""),
+    );
+  } catch (e) {
+    error = errorMessage(e);
+  }
+  done("/admin", error);
+}
+
+export async function deleteDayAction(formData: FormData): Promise<void> {
+  await requireAdmin();
+  let error: string | null = null;
+  try {
+    repo.deleteDay(Number(formData.get("dayId")));
+  } catch (e) {
+    error = errorMessage(e);
+  }
+  done("/admin", error);
+}
+
+export async function addCourtAction(formData: FormData): Promise<void> {
+  await requireAdmin();
+  const tournamentId = Number(formData.get("tournamentId"));
+  let error: string | null = null;
+  try {
+    repo.addCourt(tournamentId, String(formData.get("name") ?? ""));
+  } catch (e) {
+    error = errorMessage(e);
+  }
+  done("/admin", error);
+}
+
+export async function deleteCourtAction(formData: FormData): Promise<void> {
+  await requireAdmin();
+  let error: string | null = null;
+  try {
+    repo.deleteCourt(Number(formData.get("courtId")));
+  } catch (e) {
+    error = errorMessage(e);
+  }
+  done("/admin", error);
+}
+
+export async function generateScheduleAction(formData: FormData): Promise<void> {
+  await requireAdmin();
+  const tournamentId = Number(formData.get("tournamentId"));
+  let error: string | null = null;
+  try {
+    const { placed, unplaced } = repo.generateSchedule(tournamentId);
+    if (unplaced > 0)
+      error = `Calendario parziale: ${placed} partite programmate, ${unplaced} senza posto. Aggiungi giornate o campi, oppure allunga gli orari.`;
+  } catch (e) {
+    error = errorMessage(e);
+  }
+  done("/admin/partite", error);
 }
 
 export async function updateTeamContactAction(formData: FormData): Promise<void> {

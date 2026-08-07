@@ -134,6 +134,7 @@ export function formatSchedule(m: MatchView): string {
       }),
     );
   }
-  if (m.court) parts.push(`Campo ${m.court}`);
+  // Il nome del campo è libero (es. "Campo Mare"): niente prefisso fisso.
+  if (m.court) parts.push(m.court);
   return parts.join(" · ");
 }

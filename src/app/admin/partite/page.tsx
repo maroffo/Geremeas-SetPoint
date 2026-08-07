@@ -2,7 +2,12 @@ import { FormMessages } from "@/components/FormMessages";
 import { btnSecondary, Card, inputCls } from "@/components/ui";
 import { roundLabel } from "@/lib/bracket";
 import { requireAdmin } from "@/lib/auth";
-import { getActiveTournament, type TournamentRow } from "@/lib/repo";
+import {
+  getActiveTournament,
+  listCourts,
+  listDays,
+  type TournamentRow,
+} from "@/lib/repo";
 import {
   buildTournamentView,
   formatSchedule,
@@ -13,6 +18,7 @@ import {
 import {
   clearScoreAction,
   forfeitAction,
+  generateScheduleAction,
   saveScoreAction,
   scheduleMatchAction,
 } from "../actions";
@@ -174,9 +180,29 @@ export default async function AdminMatchesPage({
     view.groups.some((g) => g.matches.length > 0) ||
     view.knockoutRounds.length > 0;
 
+  const days = listDays(tournament.id);
+  const courts = listCourts(tournament.id);
+  const canSchedule = hasMatches && days.length > 0 && courts.length > 0;
+
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Partite</h1>
+      <div className="flex flex-wrap items-center gap-3">
+        <h1 className="text-2xl font-bold">Partite</h1>
+        {canSchedule && (
+          <form action={generateScheduleAction} className="ml-auto">
+            <input type="hidden" name="tournamentId" value={tournament.id} />
+            <button className={btnSecondary}>
+              🗓 Genera calendario (orari stimati)
+            </button>
+          </form>
+        )}
+      </div>
+      {hasMatches && !canSchedule && (
+        <p className="text-sm text-stone-500">
+          Per generare il calendario definisci giornate e campi in{" "}
+          <em>Gestione torneo</em>.
+        </p>
+      )}
       <FormMessages ok={false} error={params.error ?? null} okMessage="" />
 
       {!hasMatches && (

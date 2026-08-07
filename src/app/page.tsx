@@ -135,6 +135,10 @@ export default function HomePage() {
 
       {view.upcoming.length > 0 && tournament.status !== "finished" && (
         <Card title="Prossime partite">
+          <p className="mb-2 text-xs text-stone-500">
+            Gli orari sono indicativi: fanno fede l&apos;ordine delle partite e
+            il campo.
+          </p>
           <div className="divide-y divide-stone-100">
             {view.upcoming.map((m) => (
               <div

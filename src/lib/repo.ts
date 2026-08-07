@@ -10,6 +10,7 @@ import { roundRobin } from "./roundRobin";
 import { validateMatchScore } from "./score";
 import { computeStandings, type StandingRow } from "./standings";
 import { generateBalancedTeams } from "./teamGenerator";
+import { buildSchedule, isValidMatchMinutes } from "./scheduler";
 import { agePhrase, validatePhone } from "./validation";
 import type {
   Gender,
@@ -33,7 +34,22 @@ export interface TournamentRow {
   min_age: number | null;
   max_age: number | null;
   contact_info: string | null;
+  match_minutes: number;
   status: TournamentStatus;
+}
+
+export interface DayRow {
+  id: number;
+  tournament_id: number;
+  date: string;
+  start_time: string;
+  end_time: string;
+}
+
+export interface CourtRow {
+  id: number;
+  tournament_id: number;
+  name: string;
 }
 
 export interface TeamRow {
@@ -158,6 +174,7 @@ export interface TournamentSettings {
   minAge?: number | null;
   maxAge?: number | null;
   contactInfo?: string | null;
+  matchMinutes?: number;
 }
 
 function checkAgeBounds(s: TournamentSettings): void {
@@ -170,6 +187,8 @@ function checkAgeBounds(s: TournamentSettings): void {
   }
   if (s.minAge != null && s.maxAge != null && s.minAge > s.maxAge)
     throw new Error("L'età minima non può superare la massima");
+  if (s.matchMinutes != null && !isValidMatchMinutes(s.matchMinutes))
+    throw new Error("La durata di una partita va da 10 a 240 minuti");
 }
 
 export function createTournament(s: TournamentSettings): number {
@@ -177,8 +196,8 @@ export function createTournament(s: TournamentSettings): number {
   const res = db
     .prepare(
       `INSERT INTO tournaments
-       (name, year, team_size, format, best_of, points_per_set, points_last_set, advance_per_group, min_age, max_age, contact_info)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (name, year, team_size, format, best_of, points_per_set, points_last_set, advance_per_group, min_age, max_age, contact_info, match_minutes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       s.name,
@@ -192,6 +211,7 @@ export function createTournament(s: TournamentSettings): number {
       s.minAge ?? null,
       s.maxAge ?? null,
       s.contactInfo ?? null,
+      s.matchMinutes ?? 40,
     );
   return Number(res.lastInsertRowid);
 }
@@ -201,7 +221,7 @@ export function updateTournament(id: number, s: TournamentSettings): void {
   db.prepare(
     `UPDATE tournaments SET name = ?, year = ?, team_size = ?, format = ?,
      best_of = ?, points_per_set = ?, points_last_set = ?, advance_per_group = ?,
-     min_age = ?, max_age = ?, contact_info = ?
+     min_age = ?, max_age = ?, contact_info = ?, match_minutes = ?
      WHERE id = ?`,
   ).run(
     s.name,
@@ -215,6 +235,7 @@ export function updateTournament(id: number, s: TournamentSettings): void {
     s.minAge ?? null,
     s.maxAge ?? null,
     s.contactInfo ?? null,
+    s.matchMinutes ?? 40,
     id,
   );
 }
@@ -261,6 +282,180 @@ export function hasPoster(tournamentId: number): boolean {
       .prepare("SELECT 1 FROM tournament_posters WHERE tournament_id = ?")
       .get(tournamentId) !== undefined
   );
+}
+
+// ---------------------------------------------------------------------------
+// Giornate e campi
+// ---------------------------------------------------------------------------
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const TIME_RE = /^\d{2}:\d{2}$/;
+
+export function listDays(tournamentId: number): DayRow[] {
+  return db
+    .prepare(
+      "SELECT * FROM tournament_days WHERE tournament_id = ? ORDER BY date",
+    )
+    .all(tournamentId) as DayRow[];
+}
+
+function isValidTime(hhmm: string): boolean {
+  if (!TIME_RE.test(hhmm)) return false;
+  const [h, m] = hhmm.split(":").map(Number);
+  return h < 24 && m < 60;
+}
+
+function isValidDate(date: string): boolean {
+  if (!DATE_RE.test(date)) return false;
+  // Round-trip in UTC: una data impossibile (es. 30 febbraio) viene
+  // normalizzata da Date e non coincide più con l'input.
+  const d = new Date(`${date}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === date;
+}
+
+export function addDay(
+  tournamentId: number,
+  date: string,
+  startTime: string,
+  endTime: string,
+): void {
+  if (!isValidDate(date)) throw new Error("Data non valida");
+  if (!isValidTime(startTime) || !isValidTime(endTime))
+    throw new Error("Orario non valido");
+  if (startTime >= endTime)
+    throw new Error("L'orario di inizio deve precedere la fine");
+  const dup = db
+    .prepare(
+      "SELECT 1 FROM tournament_days WHERE tournament_id = ? AND date = ?",
+    )
+    .get(tournamentId, date);
+  if (dup) throw new Error("Giornata già presente");
+  db.prepare(
+    `INSERT INTO tournament_days (tournament_id, date, start_time, end_time)
+     VALUES (?, ?, ?, ?)`,
+  ).run(tournamentId, date, startTime, endTime);
+}
+
+export function deleteDay(dayId: number): void {
+  const day = db
+    .prepare("SELECT * FROM tournament_days WHERE id = ?")
+    .get(dayId) as DayRow | undefined;
+  if (!day) return;
+  const tx = db.transaction(() => {
+    // Le partite non giocate programmate in quella data restano senza orario,
+    // così non puntano a una giornata che non esiste più.
+    db.prepare(
+      `UPDATE matches SET scheduled_at = NULL
+       WHERE tournament_id = ? AND status = 'scheduled'
+         AND scheduled_at LIKE ? || '%'`,
+    ).run(day.tournament_id, day.date);
+    db.prepare("DELETE FROM tournament_days WHERE id = ?").run(dayId);
+  });
+  tx();
+}
+
+export function listCourts(tournamentId: number): CourtRow[] {
+  return db
+    .prepare("SELECT * FROM courts WHERE tournament_id = ? ORDER BY name")
+    .all(tournamentId) as CourtRow[];
+}
+
+export function addCourt(tournamentId: number, name: string): void {
+  const trimmed = name.trim();
+  if (!trimmed) throw new Error("Indica il nome del campo");
+  const dup = db
+    .prepare(
+      "SELECT 1 FROM courts WHERE tournament_id = ? AND lower(name) = lower(?)",
+    )
+    .get(tournamentId, trimmed);
+  if (dup) throw new Error("Esiste già un campo con questo nome");
+  db.prepare("INSERT INTO courts (tournament_id, name) VALUES (?, ?)").run(
+    tournamentId,
+    trimmed,
+  );
+}
+
+export function deleteCourt(courtId: number): void {
+  const court = db
+    .prepare("SELECT * FROM courts WHERE id = ?")
+    .get(courtId) as CourtRow | undefined;
+  if (!court) return;
+  const tx = db.transaction(() => {
+    // matches.court è denormalizzato (nome, non FK): le partite non giocate
+    // che puntavano al campo cancellato tornano senza campo.
+    db.prepare(
+      `UPDATE matches SET court = NULL
+       WHERE tournament_id = ? AND status = 'scheduled' AND court = ?`,
+    ).run(court.tournament_id, court.name);
+    db.prepare("DELETE FROM courts WHERE id = ?").run(courtId);
+  });
+  tx();
+}
+
+// ---------------------------------------------------------------------------
+// Calendario
+// ---------------------------------------------------------------------------
+
+/**
+ * Distribuisce le partite non ancora giocate su giornate e campi con orari
+ * stimati. I blocchi (round dei gironi in ordine, poi round del tabellone)
+ * non condividono mai uno slot, così una squadra non gioca due volte nello
+ * stesso orario e i round del tabellone rispettano le dipendenze.
+ */
+export function generateSchedule(tournamentId: number): {
+  placed: number;
+  unplaced: number;
+} {
+  const t = getTournament(tournamentId);
+  if (!t) throw new Error("Torneo non trovato");
+  const days = listDays(tournamentId);
+  const courts = listCourts(tournamentId);
+  const pending = listMatches(tournamentId).filter(
+    (m) => m.status === "scheduled",
+  );
+
+  const groupRounds = new Map<number, number[]>();
+  const knockoutRounds = new Map<number, number[]>();
+  for (const m of pending) {
+    const target = m.phase === "group" ? groupRounds : knockoutRounds;
+    const list = target.get(m.round) ?? [];
+    list.push(m.id);
+    target.set(m.round, list);
+  }
+  const byRound = (map: Map<number, number[]>) =>
+    [...map.entries()].sort((a, b) => a[0] - b[0]).map(([, ids]) => ({
+      matchIds: ids,
+    }));
+  const blocks = [...byRound(groupRounds), ...byRound(knockoutRounds)];
+
+  const result = buildSchedule(
+    days.map((d) => ({
+      date: d.date,
+      startTime: d.start_time,
+      endTime: d.end_time,
+    })),
+    courts.map((c) => c.name),
+    t.match_minutes,
+    blocks,
+  );
+
+  const update = db.prepare(
+    "UPDATE matches SET court = ?, scheduled_at = ? WHERE id = ?",
+  );
+  const clear = db.prepare(
+    "UPDATE matches SET court = NULL, scheduled_at = NULL WHERE id = ?",
+  );
+  const tx = db.transaction(() => {
+    for (const m of pending) clear.run(m.id);
+    for (const a of result.assignments)
+      update.run(a.court, a.scheduledAt, a.matchId);
+  });
+  tx();
+
+  return {
+    placed: result.assignments.length,
+    unplaced: result.unplacedMatchIds.length,
+  };
 }
 
 // ---------------------------------------------------------------------------
