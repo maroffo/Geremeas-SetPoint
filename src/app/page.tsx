@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { AutoRefresh } from "@/components/AutoRefresh";
 import { Bracket } from "@/components/Bracket";
 import { ContactLinks } from "@/components/ContactLinks";
 import { MatchLine } from "@/components/MatchLine";
@@ -62,6 +63,7 @@ export default function HomePage() {
 
   return (
     <div className="space-y-6">
+      <AutoRefresh />
       <div className="rounded-xl bg-gradient-to-r from-sky-700 to-cyan-600 p-6 text-white shadow">
         <h1 className="text-2xl font-bold">
           {tournament.name} {tournament.year}
