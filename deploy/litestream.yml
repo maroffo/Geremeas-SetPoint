@@ -1,0 +1,9 @@
+# ABOUTME: Configurazione Litestream: replica continua del DB SQLite su GCS
+# ABOUTME: LITESTREAM_BUCKET arriva dal servizio Cloud Run, DATABASE_PATH dal Dockerfile
+
+dbs:
+  - path: ${DATABASE_PATH}
+    replicas:
+      - type: gcs
+        bucket: ${LITESTREAM_BUCKET}
+        path: geremeas-setpoint

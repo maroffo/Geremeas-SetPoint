@@ -1,0 +1,15 @@
+# ABOUTME: Esclusioni dal build context Docker (build via Cloud Build / locale)
+# ABOUTME: Tiene fuori dipendenze, artefatti e dati locali
+
+node_modules
+.next
+.git
+.claude
+data
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+.env*
+README.md
+ANALISI.md
