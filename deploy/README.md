@@ -11,8 +11,8 @@ continuo su GCS e ripristinato dall'ultima replica a ogni avvio.
 
 | Risorsa | Nome |
 |---|---|
-| Servizio Cloud Run | `geremeas-setpoint` (regione `europe-west8`) |
-| Bucket replica DB | `gs://playground-maroffo-geremeas-db` |
+| Servizio Cloud Run | `geremeas-setpoint` (regione `europe-west1`: i domain mapping non sono disponibili a Milano) |
+| Bucket replica DB | `gs://playground-maroffo-geremeas-db` (resta in `europe-west8`: l'accesso cross-region dal Belgio è trascurabile per il volume WAL di quest'app) |
 | Service account | `geremeas-setpoint@playground-maroffo.iam.gserviceaccount.com` (solo `storage.objectAdmin` sul bucket + accesso al secret) |
 | Secret PIN admin | `geremeas-admin-pin` in Secret Manager |
 
@@ -51,7 +51,7 @@ gcloud secrets add-iam-policy-binding geremeas-admin-pin \
 gcloud run deploy geremeas-setpoint \
   --source . \
   --project playground-maroffo \
-  --region europe-west8 \
+  --region europe-west1 \
   --service-account geremeas-setpoint@playground-maroffo.iam.gserviceaccount.com \
   --allow-unauthenticated \
   --max-instances 1 \
@@ -73,7 +73,7 @@ gcloud run deploy geremeas-setpoint \
   In produzione l'app rifiuta di autenticare se `ADMIN_PIN` manca.
 - **Rotazione del PIN**: il secret è letto all'avvio dell'istanza, quindi
   dopo `gcloud secrets versions add` serve un nuovo deploy (o
-  `gcloud run services update geremeas-setpoint --region europe-west8`)
+  `gcloud run services update geremeas-setpoint --region europe-west1`)
   perché il vecchio PIN smetta di funzionare. Sempre generato
   (`openssl rand -hex 4`), mai scelto a mano.
 
