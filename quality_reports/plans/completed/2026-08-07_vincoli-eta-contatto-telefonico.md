@@ -50,7 +50,7 @@
 - [x] Verify: make check 66/66, e2e smoke, browser reale (screenshot form squadra/singolo, submit end-to-end con age_confirmed=1 nel DB)
 - [x] Review security: 0C/0M/3m, tutti e tre fixati o registrati (length cap telefono, race migrazione, retroattività in tech-debt)
 - [x] Review architecture: 0C/1M/3m; Major (age_confirmed split-brain) e tutti i minor fixati, 67/67 test
-- [ ] Commit + redeploy su Cloud Run
+- [x] Commit 899e2b8 + redeploy: revision 00004 in traffico, form 200, log senza errori (migrazione passata sul DB di produzione)
 
 ## Surprises & Discoveries
 
@@ -61,4 +61,19 @@
 
 ## Outcomes & Retrospective
 
-(a chiusura)
+**Shipped**: vincoli d'età min/max per torneo (admin), dichiarazione
+obbligatoria e persistita all'iscrizione (players.age_confirmed autoritativo,
+riepilogo su teams), contatto solo telefonico validato in repo. 12 test nuovi
+(67 totali), verificato in browser reale e in produzione (revision 00004).
+
+**Gap noti**: riverifica degli iscritti se il vincolo viene inasprito a
+iscrizioni aperte (tech-debt); nessuna raccolta della data di nascita, per
+scelta: è un'autodichiarazione.
+
+**Lezioni**:
+- Il server standalone Next fa chdir: DATABASE_PATH va sempre assoluto.
+- Mettere gli invarianti in repo.ts (checkContact come checkAgeDeclaration)
+  e non solo nelle actions: la review l'ha chiesto per lo stesso motivo per
+  cui c'erano già checkAgeBounds lì.
+- La coppia SCHEMA/MIGRATIONS va derivata da costanti condivise, il drift
+  delle DDL non ha test che lo becchi.
