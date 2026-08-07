@@ -114,6 +114,36 @@ function SettingsForm({ tournament }: { tournament: TournamentRow | null }) {
           />
         </div>
       </div>
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="mb-1 block text-sm font-medium">
+            Età minima
+          </label>
+          <input
+            name="minAge"
+            type="number"
+            min={1}
+            max={120}
+            placeholder="nessuna"
+            defaultValue={t?.min_age ?? ""}
+            className={`${inputCls} w-full`}
+          />
+        </div>
+        <div>
+          <label className="mb-1 block text-sm font-medium">
+            Età massima
+          </label>
+          <input
+            name="maxAge"
+            type="number"
+            min={1}
+            max={120}
+            placeholder="nessuna"
+            defaultValue={t?.max_age ?? ""}
+            className={`${inputCls} w-full`}
+          />
+        </div>
+      </div>
       <div>
         <label className="mb-1 block text-sm font-medium">
           Qualificate per girone

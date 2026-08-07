@@ -2,6 +2,12 @@ import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
 
+// DDL condivise tra SCHEMA e MIGRATIONS: un'unica definizione per colonna,
+// così DB nuovi (CREATE) e DB migrati (ALTER) restano identici.
+const MIN_AGE_DDL = "min_age INTEGER";
+const MAX_AGE_DDL = "max_age INTEGER";
+const AGE_CONFIRMED_DDL = "age_confirmed INTEGER NOT NULL DEFAULT 0";
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS tournaments (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -13,6 +19,8 @@ CREATE TABLE IF NOT EXISTS tournaments (
   points_per_set INTEGER NOT NULL DEFAULT 21,
   points_last_set INTEGER NOT NULL DEFAULT 15,
   advance_per_group INTEGER NOT NULL DEFAULT 2,
+  ${MIN_AGE_DDL},
+  ${MAX_AGE_DDL},
   status TEXT NOT NULL DEFAULT 'registration',
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -31,6 +39,7 @@ CREATE TABLE IF NOT EXISTS teams (
   status TEXT NOT NULL DEFAULT 'pending',
   contact TEXT,
   group_id INTEGER REFERENCES groups(id) ON DELETE SET NULL,
+  ${AGE_CONFIRMED_DDL},
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -44,6 +53,7 @@ CREATE TABLE IF NOT EXISTS players (
   contact TEXT,
   team_id INTEGER REFERENCES teams(id) ON DELETE SET NULL,
   is_reserve INTEGER NOT NULL DEFAULT 0,
+  ${AGE_CONFIRMED_DDL},
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -80,6 +90,31 @@ CREATE INDEX IF NOT EXISTS idx_matches_tournament ON matches(tournament_id);
 CREATE INDEX IF NOT EXISTS idx_set_scores_match ON set_scores(match_id);
 `;
 
+// Colonne aggiunte dopo la prima release: lo SCHEMA (CREATE TABLE IF NOT
+// EXISTS) non tocca le tabelle esistenti, quindi i DB già in produzione
+// vengono allineati con ALTER TABLE guardati da PRAGMA table_info.
+const MIGRATIONS: Array<{ table: string; column: string; ddl: string }> = [
+  { table: "tournaments", column: "min_age", ddl: MIN_AGE_DDL },
+  { table: "tournaments", column: "max_age", ddl: MAX_AGE_DDL },
+  { table: "teams", column: "age_confirmed", ddl: AGE_CONFIRMED_DDL },
+  { table: "players", column: "age_confirmed", ddl: AGE_CONFIRMED_DDL },
+];
+
+export function runMigrations(db: Database.Database): void {
+  for (const m of MIGRATIONS) {
+    const cols = db.pragma(`table_info(${m.table})`) as Array<{ name: string }>;
+    if (!cols.some((c) => c.name === m.column)) {
+      try {
+        db.exec(`ALTER TABLE ${m.table} ADD COLUMN ${m.ddl}`);
+      } catch (e) {
+        // Due processi possono controllare la colonna nello stesso momento:
+        // se l'altro ha già fatto l'ALTER, l'obiettivo è comunque raggiunto.
+        if (!/duplicate column name/.test(String(e))) throw e;
+      }
+    }
+  }
+}
+
 function createDb(): Database.Database {
   const file =
     process.env.DATABASE_PATH ??
@@ -89,6 +124,7 @@ function createDb(): Database.Database {
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   db.exec(SCHEMA);
+  runMigrations(db);
   return db;
 }
 

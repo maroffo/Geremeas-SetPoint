@@ -1,5 +1,6 @@
 import { FormMessages } from "@/components/FormMessages";
 import { getActiveTournament } from "@/lib/repo";
+import { agePhrase } from "@/lib/validation";
 import { registerTeamAction } from "../actions";
 
 export const dynamic = "force-dynamic";
@@ -27,6 +28,10 @@ export default async function RegisterTeamPage({
   }
 
   const rows = tournament.team_size + 2;
+  const ageReq = agePhrase({
+    minAge: tournament.min_age,
+    maxAge: tournament.max_age,
+  });
 
   return (
     <div className="mx-auto max-w-2xl">
@@ -34,6 +39,12 @@ export default async function RegisterTeamPage({
       <p className="mt-1 mb-6 text-stone-600">
         Squadre da {tournament.team_size} giocatori (più fino a 2 riserve).{" "}
         <strong>Almeno una ragazza per squadra!</strong>
+        {ageReq && (
+          <>
+            {" "}
+            <strong>Torneo riservato a chi ha {ageReq}.</strong>
+          </>
+        )}
       </p>
 
       <FormMessages
@@ -61,12 +72,14 @@ export default async function RegisterTeamPage({
           </div>
           <div>
             <label className="mb-1 block text-sm font-medium">
-              Contatto capitano (telefono/email) *
+              Telefono capitano *
             </label>
             <input
               name="contact"
+              type="tel"
+              inputMode="tel"
               required
-              maxLength={80}
+              maxLength={20}
               className={inputCls}
               placeholder="333 1234567"
             />
@@ -105,6 +118,22 @@ export default async function RegisterTeamPage({
             </div>
           ))}
         </div>
+
+        {ageReq && (
+          <label className="flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              name="ageConfirmed"
+              value="1"
+              required
+              className="mt-0.5"
+            />
+            <span>
+              Dichiaro che tutti i componenti della squadra, riserve incluse,
+              hanno {ageReq}. *
+            </span>
+          </label>
+        )}
 
         <button
           type="submit"

@@ -34,6 +34,11 @@ export async function logoutAction(): Promise<void> {
 // Torneo
 // ---------------------------------------------------------------------------
 
+function optionalAge(formData: FormData, field: string): number | null {
+  const raw = String(formData.get(field) ?? "").trim();
+  return raw ? Number(raw) : null;
+}
+
 function settingsFromForm(formData: FormData): repo.TournamentSettings {
   return {
     name: String(formData.get("name") ?? "Torneo di Geremeas").trim(),
@@ -44,6 +49,8 @@ function settingsFromForm(formData: FormData): repo.TournamentSettings {
     pointsPerSet: Number(formData.get("pointsPerSet") ?? 21),
     pointsLastSet: Number(formData.get("pointsLastSet") ?? 15),
     advancePerGroup: Number(formData.get("advancePerGroup") ?? 2),
+    minAge: optionalAge(formData, "minAge"),
+    maxAge: optionalAge(formData, "maxAge"),
   };
 }
 

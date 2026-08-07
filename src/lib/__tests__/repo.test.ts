@@ -38,7 +38,7 @@ describe("flusso completo del torneo", () => {
 
   it("rifiuta squadre senza ragazze", () => {
     expect(() =>
-      repo.registerTeam(tournamentId, "Solo Maschi", "333", fourPlayers(0)),
+      repo.registerTeam(tournamentId, "Solo Maschi", "3330000000", fourPlayers(0)),
     ).toThrow(/ragazza/i);
   });
 
@@ -57,7 +57,7 @@ describe("flusso completo del torneo", () => {
 
   it("rifiuta nomi squadra duplicati", () => {
     expect(() =>
-      repo.registerTeam(tournamentId, "squadra 1", "333", fourPlayers(1)),
+      repo.registerTeam(tournamentId, "squadra 1", "3330000000", fourPlayers(1)),
     ).toThrow(/nome/i);
   });
 
@@ -72,7 +72,7 @@ describe("flusso completo del torneo", () => {
           gender: g,
           skill: (i % 10) + 1,
         },
-        "333",
+        "3330000000",
       );
     });
 
@@ -194,8 +194,8 @@ describe("flusso completo del torneo", () => {
       pointsLastSet: 15,
       advancePerGroup: 2,
     });
-    const a = repo.registerTeam(t2, "A", "1", fourPlayers(1));
-    const b = repo.registerTeam(t2, "B", "2", fourPlayers(1));
+    const a = repo.registerTeam(t2, "A", "3330000001", fourPlayers(1));
+    const b = repo.registerTeam(t2, "B", "3330000002", fourPlayers(1));
     repo.setTeamStatus(a, "active");
     repo.setTeamStatus(b, "active");
     repo.generateGroups(t2, 1);
