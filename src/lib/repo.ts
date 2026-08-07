@@ -1047,11 +1047,26 @@ export function forfeitMatch(matchId: number, forfeitTeamId: number): void {
 }
 
 export function clearScore(matchId: number): void {
+  const match = getMatch(matchId);
+  if (!match) throw new Error("Partita non trovata");
+
+  const dependents =
+    match.phase === "knockout" ? propagatedDependents(match) : [];
+  for (const d of dependents) {
+    if (matchHasResult(d.match))
+      throw new Error("Annulla prima il risultato della partita successiva");
+  }
+
   const tx = db.transaction(() => {
     db.prepare("DELETE FROM set_scores WHERE match_id = ?").run(matchId);
     db.prepare(
       "UPDATE matches SET status = 'scheduled', winner = NULL, forfeit_team = NULL WHERE id = ?",
     ).run(matchId);
+    for (const d of dependents) {
+      db.prepare(
+        `UPDATE matches SET ${d.column} = NULL, winner = NULL WHERE id = ?`,
+      ).run(d.match.id);
+    }
   });
   tx();
 }
@@ -1092,6 +1107,67 @@ function propagateKnockout(match: MatchRow, winner: number): void {
        WHERE tournament_id = ? AND phase = 'knockout' AND is_third_place = 1`,
     ).run(loser, match.tournament_id);
   }
+}
+
+interface KnockoutDependent {
+  match: MatchRow;
+  column: "team_a" | "team_b";
+}
+
+function matchHasResult(match: MatchRow): boolean {
+  if (match.status !== "scheduled") return true;
+  const row = db
+    .prepare("SELECT COUNT(*) AS n FROM set_scores WHERE match_id = ?")
+    .get(match.id) as { n: number };
+  return row.n > 0;
+}
+
+/**
+ * Inverso di `propagateKnockout`: le partite (e la colonna) in cui il risultato
+ * di `match` ha già scritto una squadra. Una colonna che contiene una squadra
+ * estranea a `match` non viene riportata: non l'abbiamo propagata noi.
+ */
+function propagatedDependents(match: MatchRow): KnockoutDependent[] {
+  const totalRounds = knockoutTotalRounds(match.tournament_id);
+  if (match.is_third_place || match.round >= totalRounds) return [];
+  if (match.bracket_pos === null) return [];
+
+  const candidates: KnockoutDependent[] = [];
+  const target = advanceTarget(match.bracket_pos);
+  const next = db
+    .prepare(
+      `SELECT * FROM matches
+       WHERE tournament_id = ? AND phase = 'knockout' AND is_third_place = 0
+         AND round = ? AND bracket_pos = ?`,
+    )
+    .get(match.tournament_id, match.round + 1, target.pos) as
+    | MatchRow
+    | undefined;
+  if (next)
+    candidates.push({
+      match: next,
+      column: target.slot === "A" ? "team_a" : "team_b",
+    });
+
+  if (match.round === totalRounds - 1 && match.team_a && match.team_b) {
+    const third = db
+      .prepare(
+        `SELECT * FROM matches
+         WHERE tournament_id = ? AND phase = 'knockout' AND is_third_place = 1`,
+      )
+      .get(match.tournament_id) as MatchRow | undefined;
+    if (third)
+      candidates.push({
+        match: third,
+        column: match.bracket_pos % 2 === 0 ? "team_a" : "team_b",
+      });
+  }
+
+  return candidates.filter((c) => {
+    const propagated = c.match[c.column];
+    if (propagated === null) return false;
+    return propagated === match.team_a || propagated === match.team_b;
+  });
 }
 
 /**

@@ -50,10 +50,10 @@ Append-only after this point. The implementing session does NOT relitigate; exec
 ## Workstreams & tasklist
 
 ### W0 - REPRODUCE (bugfix propagazione, mandatory first)
-- [ ] W0.1 Test che fallisce sul codice attuale: torneo knockout 4 squadre, gioca le due semifinali, verifica finale popolata; `clearScore` sulla semifinale 1; ASSERT: la finale NON contiene più il vincitore annullato (assertion legata a `matches.team_a/team_b` del round 2, non a uno status). DEVE fallire (il vincitore resta): registra l'output rosso qui (`fails_before_fix=true`). Diventa verde con W1.1 nello stesso commit.
+- [x] W0.1 Test che fallisce sul codice attuale: torneo knockout 4 squadre, gioca le due semifinali, verifica finale popolata; `clearScore` sulla semifinale 1; ASSERT: la finale NON contiene più il vincitore annullato (assertion legata a `matches.team_a/team_b` del round 2, non a uno status). DEVE fallire (il vincitore resta): registra l'output rosso qui (`fails_before_fix=true`). Diventa verde con W1.1 nello stesso commit.
 
 ### W1 - bugfix propagazione tabellone
-- [ ] W1.1 `clearScore`: se la partita è knockout e ha dipendenti popolati, rimuovi il team propagato dai dipendenti SENZA punteggi; se un dipendente ha già punteggi, throw "Annulla prima il risultato della partita successiva". File: src/lib/repo.ts (clearScore + propagateKnockout inverso). Done: W0.1 verde + test del path rifiuto.
+- [x] W1.1 `clearScore`: se la partita è knockout e ha dipendenti popolati, rimuovi il team propagato dai dipendenti SENZA punteggi; se un dipendente ha già punteggi, throw "Annulla prima il risultato della partita successiva". File: src/lib/repo.ts (clearScore + propagateKnockout inverso). Done: W0.1 verde + test del path rifiuto.
 
 ### W2 - quick win pubblici (deploy A a fine W2)
 - [ ] W2.1 Componente ContactLinks: parse dei numeri italiani in contact_info (riuso della logica permissiva di validation.ts), render come link wa.me (numero E.164 con +39 default) e tel:; righe non-numero restano testo. Sostituisce i render in src/app/page.tsx e nelle due pagine iscrizione. Test unit sul parser.
@@ -131,7 +131,7 @@ La matrice è l'unione di: (superfici nuove del run) × (happy path + il loro ed
 
 ## Progress
 - [x] Analysis + second opinion + plan (2026-08-07, planning session; Claude isolato 401, sintesi Gemini+DeepSeek)
-- [ ] W0-W1 bugfix propagazione
+- [x] W0-W1 bugfix propagazione (2026-08-07: test RED→GREEN, `npm test` 97/97, `tsc --noEmit` pulito)
 - [ ] W2 quick win + deploy A
 - [ ] W3 riposo scheduler
 - [ ] W4 sessioni+ruoli + deploy C
@@ -145,10 +145,53 @@ La matrice è l'unione di: (superfici nuove del run) × (happy path + il loro ed
 - [ ] Close-out (plan → completed/, retrospettiva)
 
 ## Surprises & Discoveries
-(fill during execution, with evidence)
+
+### W0 REPRODUCE (2026-08-07)
+
+`REPRODUCE: script=src/lib/__tests__/knockoutClear.test.ts fails_before_fix=true`
+
+`npx vitest run src/lib/__tests__/knockoutClear.test.ts` sul codice pre-fix (repo.ts:1049 clearScore):
+
+```
+ ❯ src/lib/__tests__/knockoutClear.test.ts (5 tests | 4 failed) 9ms
+     × rimuove il vincitore propagato dalla finale e il perdente dalla finalina 4ms
+     × rifiuta l'annullamento se la finale è già stata giocata 2ms
+     × rifiuta l'annullamento se la finalina è già stata giocata 1ms
+     × rifiuta l'annullamento se il turno successivo è stato assegnato a tavolino 1ms
+
+ FAIL > rimuove il vincitore propagato dalla finale e il perdente dalla finalina
+AssertionError: expected 2 to be null
+ ❯ src/lib/__tests__/knockoutClear.test.ts:86:31
+     85|     const finalAfter = repo.getMatch(final.id)!;
+     86|     expect(finalAfter.team_a).toBeNull();
+
+ FAIL > rifiuta l'annullamento se la finale è già stata giocata
+AssertionError: expected [Function] to throw an error
+ ❯ src/lib/__tests__/knockoutClear.test.ts:100:48
+
+ Test Files  1 failed (1)
+      Tests  4 failed | 1 passed (5)
+```
+
+Dopo W1.1 (`passes_after_fix=true`):
+
+```
+ Test Files  1 passed (1)      # knockoutClear.test.ts, 5 passed (5)
+ Test Files  13 passed (13)    # npm test completo, 97 passed (97)
+```
+
+Sorpresa rispetto all'analisi: la finalina 3º/4º **esiste** (`generateKnockout` la crea a repo.ts:1158-1161 quando `rounds >= 2`) e `propagateKnockout` ci propaga anche il **perdente** della semifinale (repo.ts:1086-1094). Quindi l'annullamento di una semifinale deve disfare DUE propagazioni, non una: vincitore nella finale e perdente nella finalina. La riga 1 della E2E matrix ("edge: 3º posto") è quindi un caso reale, non ipotetico, ed è coperta dal test principale.
+
+Trappola d'ambiente per le sessioni successive: in un worktree fresco `npx tsc --noEmit` fallisce con `src/app/layout.tsx(10,50): error TS2304: Cannot find name 'LayoutProps'`. Non è codice rotto: `LayoutProps` è un tipo globale generato da Next in `.next/types/**`, incluso da tsconfig.json:29. Si risolve con `npx next typegen` (o un qualsiasi build/dev) prima di `make check`.
 
 ## Decisions
 (append-only; execution-time decisions land here)
+
+| # | Decision | Choice | Rationale | Revisit if |
+|---|----------|--------|-----------|------------|
+| 13 | (W1.1) Cosa conta come "dipendente già giocato" per il rifiuto | `status != 'scheduled'` **oppure** esistono righe in `set_scores` | il forfait scrive set_scores e `status='forfeit'`: il solo controllo su set_scores mancherebbe casi futuri, il solo controllo su status mancherebbe punteggi orfani | si introduce uno stato "in corso" con punteggi parziali |
+| 14 | (W1.1) Ambito dell'annullamento della propagazione | la finalina 3º/4º è inclusa: `clearScore` su una semifinale toglie il vincitore dalla finale **e** il perdente dalla finalina | la finalina esiste (repo.ts:1158-1161) e `propagateKnockout` ci scrive il perdente: disfarne solo metà lascerebbe il tabellone incoerente | il tabellone smette di generare la finalina |
+| 15 | (W1.1) Colonne toccate nel dipendente | solo se il valore presente è una delle due squadre della partita annullata; nessuna cascata sui turni oltre il primo dipendente | una colonna con una squadra estranea non è stata scritta da noi; la cascata è esclusa dalla decisione 12 (i dipendenti con punteggi sono rifiutati, non svuotati) | si volesse un "annulla a cascata" esplicito lato UI |
 
 ## Outcomes & Retrospective
 (fill at close)
