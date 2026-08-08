@@ -133,25 +133,34 @@ La matrice è l'unione di: (superfici nuove del run) × (happy path + il loro ed
 - [x] Analysis + second opinion + plan (2026-08-07, planning session; Claude isolato 401, sintesi Gemini+DeepSeek)
 - [x] W0-W1 bugfix propagazione (2026-08-07: test RED→GREEN, `npm test` 97/97, `tsc --noEmit` pulito)
 - [x] W2.1-W2.3 quick win pubblici (2026-08-07: `npm test` 113/113, `tsc --noEmit` pulito, probe HTTP sul server standalone verde)
-- [ ] W2.4 deploy A
+- [x] W2.4 deploy A (2026-08-08: incluso nel deploy unico del branch finale, revision geremeas-setpoint-00005-plm; prod verificato: contatti wa.me/tel in home, /squadra/999999 e /squadra/abc → 404)
 - [x] W3.1-W3.2 riposo scheduler (2026-08-08: `npm test` 119/119, `tsc --noEmit` pulito, `make test-e2e` verde)
 - [x] W4.1-W4.2 sessioni + ruoli (2026-08-08: `npm test` 136/136, `tsc --noEmit` pulito, `make test-e2e` verde con le nuove probe di sessione)
-- [ ] W4.3-W4.4 secret SCOREKEEPER_PIN + deploy C
+- [x] W4.3-W4.4 secret SCOREKEEPER_PIN + deploy C (2026-08-08: secret `geremeas-scorekeeper-pin` creato + binding IAM; deploy con entrambi i PIN; re-login prod verificato NEL BROWSER: admin nav completa, logout revoca (── /admin → login), scorekeeper nav ridotta "Segnapunti: Partite" e /admin → /admin/partite. PIN segnapunti riportato a Max)
 - [x] W5.1-W5.2 riempi-buchi + timezone (2026-08-08: `npm test` 157/157, `npx next typegen && npx tsc --noEmit` pulito, `make test-e2e` verde, probe di rendering sulla pagina partite verde)
-- [ ] W5.3 deploy B (W3+W5)
+- [x] W5.3 deploy B (W3+W5) (2026-08-08: incluso nel deploy unico; codice in prod. Verifica funzionale del calendario non esercitabile: torneo attivo in "Iscrizioni aperte" con 0 squadre, non creo dati fittizi sul torneo live; copertura da unit+integration+Playwright)
 - [x] W6.1 archivio edizioni (2026-08-08: `npm test` 166/166, `npx next typegen && npx tsc --noEmit` pulito, `make test-e2e` verde, probe HTTP dello storico verde)
-- [ ] W6.2 deploy D
-- [ ] W7 operatività
+- [x] W6.2 deploy D (2026-08-08: incluso nel deploy unico; prod `/storico` → 200, link "Storico edizioni" nel footer verificato nel browser)
+- [~] W7 operatività: W7.2 uptime check FATTO (check `geremeas-setpoint-home` HTTPS su setpoint.wishew.com ogni 5 min + channel email massimiliano.aroffo@hikmaai.io + alert policy "Geremeas SetPoint uptime down" attiva). W7.1 restore drill: replica litestream viva e aggiornata (WAL+snapshot correnti, ultimo dal deploy delle 10:45), ma restore completo pending binario `litestream` assente localmente
 - [x] W8.1 Playwright full-flow (2026-08-08: `make test-e2e-full` verde da build pulita in 7,6s, `npm test` 166/166, `npx next typegen && npx tsc --noEmit` pulito, `make test-e2e` smoke verde)
 - [x] W9.1 docs (2026-08-08: deploy/README.md, README.md, tech-debt.md; `make check` verde dopo `npx next typegen`, 166/166 test)
 - [x] W9.2 follow-up filed (2026-08-08: issue #3 agent:ready scheduler per-campo, #4 agent:needs-spec QR pagina squadra)
 - [x] Review round 1 (2026-08-08: security+architecture+test, findings in `quality_reports/reviews/2026-08-07_nightrun-miglioramenti/001-findings.md`)
 - [x] Fix round 1 (2026-08-08: M1 XFF-ultimo, M2 toMatchView condiviso, m1 open-redirect backslash, m2 formatSchedule senza `new Date`, m5 COVERAGE onesta; `npm test` 167/167, `npx next typegen && npx tsc --noEmit` pulito, `make test-e2e` verde. m3/m4 accettati come tech-debt dall'orchestratore)
 - [x] PR + SCORE (2026-08-08: PR #5 draft verso deploy/gcp-cloud-run, SCORE 94/100 gate pr; approval in `quality_reports/approvals/2026-08-07_nightrun-miglioramenti.md`)
-- [ ] BLOCCATO su Max: deploy A/B/C/D + verifica prod (W2.4, W4.3-4.4, W5.3, W6.2), W7 operatività (restore drill + uptime check) — richiedono `gcloud auth login` (token scaduto in sessione)
-- [ ] Close-out (plan → completed/, retrospettiva) — dopo i deploy
+- [x] Deploy prod + verifica (2026-08-08: revision 00005-plm 100% traffico; fasi A/C/B/D verificate come sopra; uptime check attivo)
+- [ ] Residuo per Max: restore drill completo W7.1 (installare `litestream` e restore su DB temporaneo) — non bloccante, replica confermata viva
+- [ ] Close-out (plan → completed/, retrospettiva) — la PR #5 non è ancora mergiata (review umana)
 
 ## Surprises & Discoveries
+
+### Deploy prod (2026-08-08)
+
+Il primo tentativo di deploy A (notte) era fallito con `ConnectionError` verso cloudbuild (rete non raggiungibile) + token gcloud scaduto: i deploy sono stati eseguiti la mattina dopo `gcloud auth login`.
+
+Bug del secret segnapunti: ho creato `geremeas-scorekeeper-pin` con `openssl rand -hex 4 > file` e `--data-file=file`, che lascia un `\n` finale nel valore (9 byte: `65f333fc0a`). L'app confronta lo sha256 del PIN inserito con quello del secret → mismatch per il newline, login scorekeeper "PIN errato" mentre l'admin funzionava. Il deploy/README documenta il comando corretto (`openssl rand -hex 4 | tr -d '\n' | gcloud secrets create ...`, riga 50): l'errore è stato deviare dal comando documentato. Fix: versione 2 del secret con `printf '<pin>'` (8 byte, niente newline) + `gcloud run services update --update-secrets`, revision 00005-plm. Lezione: seguire il comando del README alla lettera; il `tr -d '\n'` non è cosmetico.
+
+Verifica re-login in prod (hard req 9) fatta nel browser: admin → nav completa; logout → sessione revocata (/admin ridà il login); scorekeeper → nav ridotta "Segnapunti: Partite" e /admin reindirizza a /admin/partite. Torneo attivo in "Iscrizioni aperte" con 0 squadre: nessuna pagina squadra reale né calendario da esercitare senza creare dati fittizi sul torneo live.
 
 ### W0 REPRODUCE (2026-08-07)
 
