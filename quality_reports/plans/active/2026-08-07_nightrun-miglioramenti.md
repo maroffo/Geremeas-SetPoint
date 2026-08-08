@@ -144,11 +144,12 @@ La matrice è l'unione di: (superfici nuove del run) × (happy path + il loro ed
 - [ ] W7 operatività
 - [x] W8.1 Playwright full-flow (2026-08-08: `make test-e2e-full` verde da build pulita in 7,6s, `npm test` 166/166, `npx next typegen && npx tsc --noEmit` pulito, `make test-e2e` smoke verde)
 - [x] W9.1 docs (2026-08-08: deploy/README.md, README.md, tech-debt.md; `make check` verde dopo `npx next typegen`, 166/166 test)
-- [ ] W9.2 follow-up filed a PR time
+- [x] W9.2 follow-up filed (2026-08-08: issue #3 agent:ready scheduler per-campo, #4 agent:needs-spec QR pagina squadra)
 - [x] Review round 1 (2026-08-08: security+architecture+test, findings in `quality_reports/reviews/2026-08-07_nightrun-miglioramenti/001-findings.md`)
 - [x] Fix round 1 (2026-08-08: M1 XFF-ultimo, M2 toMatchView condiviso, m1 open-redirect backslash, m2 formatSchedule senza `new Date`, m5 COVERAGE onesta; `npm test` 167/167, `npx next typegen && npx tsc --noEmit` pulito, `make test-e2e` verde. m3/m4 accettati come tech-debt dall'orchestratore)
-- [ ] PR + SCORE
-- [ ] Close-out (plan → completed/, retrospettiva)
+- [x] PR + SCORE (2026-08-08: PR #5 draft verso deploy/gcp-cloud-run, SCORE 94/100 gate pr; approval in `quality_reports/approvals/2026-08-07_nightrun-miglioramenti.md`)
+- [ ] BLOCCATO su Max: deploy A/B/C/D + verifica prod (W2.4, W4.3-4.4, W5.3, W6.2), W7 operatività (restore drill + uptime check) — richiedono `gcloud auth login` (token scaduto in sessione)
+- [ ] Close-out (plan → completed/, retrospettiva) — dopo i deploy
 
 ## Surprises & Discoveries
 
