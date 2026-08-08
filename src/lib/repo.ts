@@ -400,7 +400,9 @@ export function deleteCourt(courtId: number): void {
  * Distribuisce le partite non ancora giocate su giornate e campi con orari
  * stimati. I blocchi (round dei gironi in ordine, poi round del tabellone)
  * non condividono mai uno slot, così una squadra non gioca due volte nello
- * stesso orario e i round del tabellone rispettano le dipendenze.
+ * stesso orario e i round del tabellone rispettano le dipendenze. Con le
+ * squadre delle partite lo scheduler evita anche due slot attaccati alla
+ * stessa squadra, quando la capienza lo permette.
  */
 export function generateSchedule(tournamentId: number): {
   placed: number;
@@ -428,6 +430,14 @@ export function generateSchedule(tournamentId: number): {
     }));
   const blocks = [...byRound(groupRounds), ...byRound(knockoutRounds)];
 
+  // Membership per il riposo: i round di tabellone non ancora propagati hanno
+  // le squadre a NULL, quindi restano senza vincolo (nessuno da far riposare).
+  const teamsByMatch = new Map<number, number[]>();
+  for (const m of pending) {
+    const teams = [m.team_a, m.team_b].filter((id): id is number => id !== null);
+    if (teams.length > 0) teamsByMatch.set(m.id, teams);
+  }
+
   const result = buildSchedule(
     days.map((d) => ({
       date: d.date,
@@ -437,6 +447,7 @@ export function generateSchedule(tournamentId: number): {
     courts.map((c) => c.name),
     t.match_minutes,
     blocks,
+    teamsByMatch,
   );
 
   const update = db.prepare(

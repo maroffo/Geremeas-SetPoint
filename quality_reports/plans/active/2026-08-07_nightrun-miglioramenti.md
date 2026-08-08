@@ -62,8 +62,8 @@ Append-only after this point. The implementing session does NOT relitigate; exec
 - [ ] W2.4 Deploy A + verifica prod (home, una pagina squadra, link wa.me).
 
 ### W3 - riposo scheduler (deploy B con W5)
-- [ ] W3.1 buildSchedule: firma con `teamsByMatch: Map<number, number[]>`; riordino interno al blocco (le partite di squadre che hanno giocato nello slot precedente vanno in fondo alla coda del blocco); se il back-to-back persiste e restano slot sufficienti (lookahead `remainingSlots > ceil(remainingMatches/courts)`), inserisci UNO slot buffer; doppia passata come rete di sicurezza (se pass-1 produce unplaced, usa pass-2 senza riposo). Test: capienza larga → zero back-to-back; capienza stretta → stesso placed count di oggi; proprietà su pool casuali.
-- [ ] W3.2 generateSchedule passa la membership (team_a/team_b delle pending).
+- [x] W3.1 buildSchedule: firma con `teamsByMatch: Map<number, number[]>`; riordino interno al blocco (le partite di squadre che hanno giocato nello slot precedente vanno in fondo alla coda del blocco); se il back-to-back persiste e restano slot sufficienti (lookahead `remainingSlots > ceil(remainingMatches/courts)`), inserisci UNO slot buffer; doppia passata come rete di sicurezza (se pass-1 produce unplaced, usa pass-2 senza riposo). Test: capienza larga → zero back-to-back; capienza stretta → stesso placed count di oggi; proprietà su pool casuali.
+- [x] W3.2 generateSchedule passa la membership (team_a/team_b delle pending).
 
 ### W4 - sessioni + ruoli (deploy C subito verificato)
 - [ ] W4.1 Tabella `sessions` (id, token_hash UNIQUE, role, created_at, expires_at) in db.ts (CREATE IF NOT EXISTS, niente ALTER); auth.ts riscritto: createSession/validateSession/revokeSession, cookie col token raw, DB con sha256; loginAdmin accetta ADMIN_PIN→admin, SCOREKEEPER_PIN→scorekeeper (secret opzionale: assente = ruolo disattivo); lockout in-memory (Map ip→{fails,until}) 5 tentativi → 15 min; cleanup lazy delle scadute al login. Test: login/logout/revoca, ruolo, lockout, scadenza.
@@ -134,7 +134,7 @@ La matrice è l'unione di: (superfici nuove del run) × (happy path + il loro ed
 - [x] W0-W1 bugfix propagazione (2026-08-07: test RED→GREEN, `npm test` 97/97, `tsc --noEmit` pulito)
 - [x] W2.1-W2.3 quick win pubblici (2026-08-07: `npm test` 113/113, `tsc --noEmit` pulito, probe HTTP sul server standalone verde)
 - [ ] W2.4 deploy A
-- [ ] W3 riposo scheduler
+- [x] W3.1-W3.2 riposo scheduler (2026-08-08: `npm test` 119/119, `tsc --noEmit` pulito, `make test-e2e` verde)
 - [ ] W4 sessioni+ruoli + deploy C
 - [ ] W5 riempi-buchi/timezone + deploy B
 - [ ] W6 archivio + deploy D
@@ -198,6 +198,20 @@ PROBE OK: squadra 4 200 e pulita, 404 su id inesistente/non numerico, link wa.me
 
 Il probe verifica anche il vincolo di sicurezza sull'HTML servito, non solo sul payload: nessuna occorrenza di `skill`, `age_confirmed`, `contact` né di un numero di telefono nella pagina squadra.
 
+### W3 riposo scheduler (2026-08-08)
+
+Con il lookahead calcolato **esatto** (fabbisogno = somma di `ceil(partite_blocco / campi)` sul blocco corrente e su tutti i successivi, non `ceil(totale/campi)`) la differenza `slot rimasti - slot necessari` è **invariante** rispetto al piazzamento di un batch: cala di 1 da entrambi i lati. Il cuscinetto si inserisce solo con differenza strettamente positiva, quindi la passata con riposo non può mai finire gli slot prima di quella senza. Conseguenza: la pass-2 è una rete di sicurezza che, con questa implementazione, non si attiva mai. Resta in piedi perché la garanzia dipende dall'esattezza del lookahead, cioè esattamente la cosa che una modifica futura può rompere in silenzio; il test di equivalenza sui pool casuali (`placed` identico con e senza membership, 120 seed) è la verifica che la sostituisce sul piano osservabile.
+
+Il riposo **costa calendario**, non partite. Il test d'integrazione dei gironi lo ha reso visibile subito:
+
+```
+AssertionError: expected Set{ '2026-08-10', '2026-08-11' } to deeply equal Set{ '2026-08-10' }
+```
+
+6 squadre in 2 gironi da 3: in un girone da 3 le stesse squadre tornano in campo a ogni round, quindi tra round 1 e round 2 il cuscinetto è obbligatorio e il round 3 scivola sulla giornata dopo (18:00 e 19:20 il primo giorno, 18:00 il secondo). L'attesa vecchia ("tutte nella prima giornata") era un artefatto del back-to-back, non un invariante: sostituita con gli orari attesi più l'asserzione esplicita di riposo. Da tenere presente per la comunicazione a Max: a parità di giornate configurate il calendario si allunga, non si perdono partite.
+
+Sorpresa utile per il tabellone: al momento di `generateSchedule` i round di tabellone oltre il primo hanno `team_a/team_b` a NULL (non ancora propagati), quindi restano senza membership e senza vincolo di riposo. Nessun cuscinetto sprecato lì, e il test del tabellone (finale dopo le semifinali) resta invariato.
+
 ## Decisions
 (append-only; execution-time decisions land here)
 
@@ -214,6 +228,11 @@ Il probe verifica anche il vincolo di sicurezza sull'HTML servito, non solo sul 
 | 21 | (W2.3) Come si evita di esporre i campi sensibili | le colonne pubbliche sono elencate nella SELECT dei giocatori (niente `SELECT *`) e il payload è rimappato a `firstName/lastName/gender` | doppia barriera: anche aggiungendo domani una colonna sensibile a `players`, non finisce nella vista | il payload cresce fino a giustificare un tipo condiviso con le altre viste |
 | 22 | (W2.3) Link alle pagine squadra | oltre alla lista in home (visibile solo in fase iscrizioni) anche i nomi in classifica, via prop `linkTeams` di `StandingsTable`; admin invariato | senza questo la pagina è irraggiungibile proprio nei giorni di gara (vedi Surprises W2) | si aggiungono QR/short-link (follow-up W9.2b) |
 | 23 | (W2.3) Id non canonici nell'URL | `/^\d+$/` sul segmento: `1e1` o ` 10` danno 404, non la squadra 10 | lo scoping regge comunque, ma un record non deve avere infiniti URL | si introducono slug al posto degli id |
+| 24 | (W3.1) `teamsByMatch` è un parametro obbligatorio, non opzionale | quinto argomento richiesto di `buildSchedule`, i test che non riguardano il riposo passano `noTeams` esplicito | una membership dimenticata disattiverebbe il riposo in silenzio; da obbligatoria il typecheck la reclama, e il prossimo chiamante (W5 riempi-buchi) non può ometterla per distrazione | si aggiungono chiamanti dove la membership non è davvero conoscibile |
+| 25 | (W3.1) Formula del lookahead | fabbisogno esatto = `ceil(coda_blocco_corrente/campi)` + somma di `ceil(partite/campi)` sui blocchi successivi, invece del `ceil(partite_rimaste/campi)` del piano | i blocchi non condividono mai uno slot, quindi la formula aggregata sottostima il fabbisogno e autorizzerebbe cuscinetti che poi costano partite; quella esatta rende la garanzia "il riposo non perde partite" strutturale invece che rattoppata dalla pass-2 | i blocchi smettono di essere esclusivi sullo slot |
+| 26 | (W3.1) Cosa conta come "slot immediatamente precedente" | solo stessa giornata e indice contiguo (`isBackToBack`); il cambio di giornata azzera il vincolo | tra l'ultimo slot di una sera e il primo della mattina dopo il riposo c'è già; senza questo controllo si sprecherebbe un cuscinetto a ogni confine di giornata, allungando il calendario per nulla | si introducono giornate con più fasce orarie separate nello stesso giorno |
+| 27 | (W3.1) Esito della doppia passata | se pass-1 lascia partite fuori si tiene la passata con MENO unplaced (a parità vince pass-1, che ha il riposo), invece di adottare pass-2 a scatola chiusa | pass-2 non è mai peggiore per costruzione, ma prendere il minimo rende la rete di sicurezza vera in ogni caso, anche se una modifica futura rompesse quella costruzione | pass-2 diventa la passata di riferimento per altri motivi |
+| 28 | (W3.1) Cosa fa il riordino quando il batch resta misto | il batch continua a riempire tutti i campi (le partite in conflitto restano in coda ma non si lascia un campo vuoto); il cuscinetto scatta se dopo il riordino il batch contiene ancora un back-to-back | lasciare campi vuoti per il riposo è l'unico modo di perdere capienza davvero; il cuscinetto è reversibile dal lookahead, un campo vuoto no | si passa a un modello per-campo (follow-up W9.2a) |
 
 ## Outcomes & Retrospective
 (fill at close)

@@ -81,9 +81,37 @@ describe("giornate, campi e generazione calendario", () => {
         teamSlots.add(key);
       }
     }
-    // 6 partite da 40' su 2 campi: 3 slot, tutti nella prima giornata
-    const dates = new Set(matches.map((m) => m.scheduled_at!.split("T")[0]));
-    expect(dates).toEqual(new Set(["2026-08-10"]));
+    // 6 partite da 40' su 2 campi: un round per slot. In ogni girone da 3 le
+    // stesse squadre tornano in campo a ogni round, quindi il riposo mette
+    // uno slot cuscinetto e il terzo round scivola sulla giornata dopo.
+    const times = [...new Set(matches.map((m) => m.scheduled_at!))].sort();
+    expect(times).toEqual([
+      "2026-08-10T18:00",
+      "2026-08-10T19:20",
+      "2026-08-11T18:00",
+    ]);
+
+    // Nessuna squadra in due slot attaccati nella stessa giornata (40').
+    const timesByTeam = new Map<number, string[]>();
+    for (const m of matches)
+      for (const team of [m.team_a, m.team_b]) {
+        if (team === null) continue;
+        timesByTeam.set(team, [...(timesByTeam.get(team) ?? []), m.scheduled_at!]);
+      }
+    for (const [, slots] of timesByTeam) {
+      const sorted = [...slots].sort();
+      for (let i = 1; i < sorted.length; i++) {
+        const [prevDate, prevTime] = sorted[i - 1].split("T");
+        const [date, time] = sorted[i].split("T");
+        const gap =
+          prevDate === date
+            ? Number(time.slice(0, 2)) * 60 +
+              Number(time.slice(3)) -
+              (Number(prevTime.slice(0, 2)) * 60 + Number(prevTime.slice(3)))
+            : Infinity;
+        expect(gap).toBeGreaterThan(40);
+      }
+    }
   });
 
   it("rigenerare riprogramma solo le partite non giocate", () => {
