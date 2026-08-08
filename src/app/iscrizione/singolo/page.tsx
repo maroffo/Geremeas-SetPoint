@@ -1,3 +1,4 @@
+import { ContactLinks } from "@/components/ContactLinks";
 import { FormMessages } from "@/components/FormMessages";
 import { getActiveTournament } from "@/lib/repo";
 import { agePhrase } from "@/lib/validation";
@@ -56,7 +57,7 @@ export default async function RegisterSinglePage({
       {tournament.contact_info && (
         <p className="mb-4 whitespace-pre-line text-sm text-stone-600">
           <span className="font-medium">Per info:</span>{" "}
-          {tournament.contact_info}
+          <ContactLinks text={tournament.contact_info} />
         </p>
       )}
 

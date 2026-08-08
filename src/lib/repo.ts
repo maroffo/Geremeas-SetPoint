@@ -10,7 +10,17 @@ import { roundRobin } from "./roundRobin";
 import { validateMatchScore } from "./score";
 import { computeStandings, type StandingRow } from "./standings";
 import { generateBalancedTeams } from "./teamGenerator";
-import { buildSchedule, isValidMatchMinutes } from "./scheduler";
+import {
+  buildSchedule,
+  daysAfter,
+  isAdjacentSlot,
+  isValidMatchMinutes,
+  type DaySlot,
+  type ScheduleBlock,
+  type TeamsByMatch,
+} from "./scheduler";
+import { nowInRome } from "./clock";
+import { toMatchView, type MatchView } from "./view";
 import { agePhrase, validatePhone } from "./validation";
 import type {
   Gender,
@@ -397,10 +407,54 @@ export function deleteCourt(courtId: number): void {
 // ---------------------------------------------------------------------------
 
 /**
+ * Blocchi e membership per lo scheduler, dalle partite da programmare: i round
+ * dei gironi in ordine, poi quelli del tabellone. Dentro un round le squadre
+ * sono tutte diverse, quindi il blocco è giocabile in parallelo.
+ *
+ * I round di tabellone non ancora propagati hanno le squadre a NULL: restano
+ * senza membership e quindi senza vincolo di riposo (non c'è nessuno da far
+ * riposare).
+ */
+function scheduleInput(pending: MatchRow[]): {
+  blocks: ScheduleBlock[];
+  teamsByMatch: TeamsByMatch;
+} {
+  const groupRounds = new Map<number, number[]>();
+  const knockoutRounds = new Map<number, number[]>();
+  const teamsByMatch: TeamsByMatch = new Map();
+  for (const m of pending) {
+    const target = m.phase === "group" ? groupRounds : knockoutRounds;
+    const list = target.get(m.round) ?? [];
+    list.push(m.id);
+    target.set(m.round, list);
+    const teams = [m.team_a, m.team_b].filter((id): id is number => id !== null);
+    if (teams.length > 0) teamsByMatch.set(m.id, teams);
+  }
+  const byRound = (map: Map<number, number[]>) =>
+    [...map.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([, ids]) => ({ matchIds: ids }));
+  return {
+    blocks: [...byRound(groupRounds), ...byRound(knockoutRounds)],
+    teamsByMatch,
+  };
+}
+
+function daySlots(tournamentId: number): DaySlot[] {
+  return listDays(tournamentId).map((d) => ({
+    date: d.date,
+    startTime: d.start_time,
+    endTime: d.end_time,
+  }));
+}
+
+/**
  * Distribuisce le partite non ancora giocate su giornate e campi con orari
  * stimati. I blocchi (round dei gironi in ordine, poi round del tabellone)
  * non condividono mai uno slot, così una squadra non gioca due volte nello
- * stesso orario e i round del tabellone rispettano le dipendenze.
+ * stesso orario e i round del tabellone rispettano le dipendenze. Con le
+ * squadre delle partite lo scheduler evita anche due slot attaccati alla
+ * stessa squadra, quando la capienza lo permette.
  */
 export function generateSchedule(tournamentId: number): {
   placed: number;
@@ -408,35 +462,18 @@ export function generateSchedule(tournamentId: number): {
 } {
   const t = getTournament(tournamentId);
   if (!t) throw new Error("Torneo non trovato");
-  const days = listDays(tournamentId);
   const courts = listCourts(tournamentId);
   const pending = listMatches(tournamentId).filter(
     (m) => m.status === "scheduled",
   );
-
-  const groupRounds = new Map<number, number[]>();
-  const knockoutRounds = new Map<number, number[]>();
-  for (const m of pending) {
-    const target = m.phase === "group" ? groupRounds : knockoutRounds;
-    const list = target.get(m.round) ?? [];
-    list.push(m.id);
-    target.set(m.round, list);
-  }
-  const byRound = (map: Map<number, number[]>) =>
-    [...map.entries()].sort((a, b) => a[0] - b[0]).map(([, ids]) => ({
-      matchIds: ids,
-    }));
-  const blocks = [...byRound(groupRounds), ...byRound(knockoutRounds)];
+  const { blocks, teamsByMatch } = scheduleInput(pending);
 
   const result = buildSchedule(
-    days.map((d) => ({
-      date: d.date,
-      startTime: d.start_time,
-      endTime: d.end_time,
-    })),
+    daySlots(tournamentId),
     courts.map((c) => c.name),
     t.match_minutes,
     blocks,
+    teamsByMatch,
   );
 
   const update = db.prepare(
@@ -447,6 +484,82 @@ export function generateSchedule(tournamentId: number): {
   );
   const tx = db.transaction(() => {
     for (const m of pending) clear.run(m.id);
+    for (const a of result.assignments)
+      update.run(a.court, a.scheduledAt, a.matchId);
+  });
+  tx();
+
+  return {
+    placed: result.assignments.length,
+    unplaced: result.unplacedMatchIds.length,
+  };
+}
+
+/**
+ * Completa il calendario a torneo iniziato: programma SOLO le partite ancora
+ * senza orario e non tocca nulla di ciò che è già in calendario (niente clear).
+ *
+ * Gli slot utilizzabili sono quelli strettamente successivi sia all'ultima
+ * partita già in programma sia ad adesso: da lì discende che non può nascere
+ * una collisione campo+orario con l'esistente e che nessuna partita finisce nel
+ * passato. Tutti i confronti sono lessicali su stringhe naive di Roma
+ * ("YYYY-MM-DDTHH:MM"), mai `new Date()` su una di esse.
+ *
+ * `at` è iniettabile per i test; in produzione è l'istante corrente.
+ */
+export function fillScheduleGaps(
+  tournamentId: number,
+  at: Date = new Date(),
+): { placed: number; unplaced: number } {
+  const t = getTournament(tournamentId);
+  if (!t) throw new Error("Torneo non trovato");
+  const days = daySlots(tournamentId);
+  if (days.length === 0) throw new Error("Definisci almeno una giornata");
+  const courts = listCourts(tournamentId);
+  if (courts.length === 0) throw new Error("Definisci almeno un campo");
+
+  const matches = listMatches(tournamentId);
+  const pending = matches.filter(
+    (m) => m.status === "scheduled" && m.scheduled_at === null,
+  );
+  if (pending.length === 0) return { placed: 0, unplaced: 0 };
+
+  let lastOccupied = "";
+  for (const m of matches)
+    if (m.scheduled_at !== null && m.scheduled_at > lastOccupied)
+      lastOccupied = m.scheduled_at;
+  const now = nowInRome(at);
+  const after = lastOccupied > now ? lastOccupied : now;
+
+  const available = daysAfter(days, t.match_minutes, after);
+  // Nessuno slot residuo: le partite restano senza orario, contate onestamente
+  // come unplaced invece di essere forzate su orari già occupati o passati.
+  if (available.length === 0) return { placed: 0, unplaced: pending.length };
+
+  // Il riposo vale anche rispetto all'ultimo slot già giocato/programmato,
+  // ma solo se il primo slot libero gli è davvero attaccato.
+  const firstFree = `${available[0].date}T${available[0].startTime}`;
+  const busyBefore = new Set<number>();
+  if (lastOccupied && isAdjacentSlot(lastOccupied, firstFree, t.match_minutes))
+    for (const m of matches)
+      if (m.scheduled_at === lastOccupied)
+        for (const teamId of [m.team_a, m.team_b])
+          if (teamId !== null) busyBefore.add(teamId);
+
+  const { blocks, teamsByMatch } = scheduleInput(pending);
+  const result = buildSchedule(
+    available,
+    courts.map((c) => c.name),
+    t.match_minutes,
+    blocks,
+    teamsByMatch,
+    busyBefore,
+  );
+
+  const update = db.prepare(
+    "UPDATE matches SET court = ?, scheduled_at = ? WHERE id = ?",
+  );
+  const tx = db.transaction(() => {
     for (const a of result.assignments)
       update.run(a.court, a.scheduledAt, a.matchId);
   });
@@ -1047,11 +1160,26 @@ export function forfeitMatch(matchId: number, forfeitTeamId: number): void {
 }
 
 export function clearScore(matchId: number): void {
+  const match = getMatch(matchId);
+  if (!match) throw new Error("Partita non trovata");
+
+  const dependents =
+    match.phase === "knockout" ? propagatedDependents(match) : [];
+  for (const d of dependents) {
+    if (matchHasResult(d.match))
+      throw new Error("Annulla prima il risultato della partita successiva");
+  }
+
   const tx = db.transaction(() => {
     db.prepare("DELETE FROM set_scores WHERE match_id = ?").run(matchId);
     db.prepare(
       "UPDATE matches SET status = 'scheduled', winner = NULL, forfeit_team = NULL WHERE id = ?",
     ).run(matchId);
+    for (const d of dependents) {
+      db.prepare(
+        `UPDATE matches SET ${d.column} = NULL, winner = NULL WHERE id = ?`,
+      ).run(d.match.id);
+    }
   });
   tx();
 }
@@ -1092,6 +1220,67 @@ function propagateKnockout(match: MatchRow, winner: number): void {
        WHERE tournament_id = ? AND phase = 'knockout' AND is_third_place = 1`,
     ).run(loser, match.tournament_id);
   }
+}
+
+interface KnockoutDependent {
+  match: MatchRow;
+  column: "team_a" | "team_b";
+}
+
+function matchHasResult(match: MatchRow): boolean {
+  if (match.status !== "scheduled") return true;
+  const row = db
+    .prepare("SELECT COUNT(*) AS n FROM set_scores WHERE match_id = ?")
+    .get(match.id) as { n: number };
+  return row.n > 0;
+}
+
+/**
+ * Inverso di `propagateKnockout`: le partite (e la colonna) in cui il risultato
+ * di `match` ha già scritto una squadra. Una colonna che contiene una squadra
+ * estranea a `match` non viene riportata: non l'abbiamo propagata noi.
+ */
+function propagatedDependents(match: MatchRow): KnockoutDependent[] {
+  const totalRounds = knockoutTotalRounds(match.tournament_id);
+  if (match.is_third_place || match.round >= totalRounds) return [];
+  if (match.bracket_pos === null) return [];
+
+  const candidates: KnockoutDependent[] = [];
+  const target = advanceTarget(match.bracket_pos);
+  const next = db
+    .prepare(
+      `SELECT * FROM matches
+       WHERE tournament_id = ? AND phase = 'knockout' AND is_third_place = 0
+         AND round = ? AND bracket_pos = ?`,
+    )
+    .get(match.tournament_id, match.round + 1, target.pos) as
+    | MatchRow
+    | undefined;
+  if (next)
+    candidates.push({
+      match: next,
+      column: target.slot === "A" ? "team_a" : "team_b",
+    });
+
+  if (match.round === totalRounds - 1 && match.team_a && match.team_b) {
+    const third = db
+      .prepare(
+        `SELECT * FROM matches
+         WHERE tournament_id = ? AND phase = 'knockout' AND is_third_place = 1`,
+      )
+      .get(match.tournament_id) as MatchRow | undefined;
+    if (third)
+      candidates.push({
+        match: third,
+        column: match.bracket_pos % 2 === 0 ? "team_a" : "team_b",
+      });
+  }
+
+  return candidates.filter((c) => {
+    const propagated = c.match[c.column];
+    if (propagated === null) return false;
+    return propagated === match.team_a || propagated === match.team_b;
+  });
 }
 
 /**
@@ -1213,4 +1402,159 @@ export function podium(tournamentId: number): Podium {
         : final.team_a
       : null;
   return { first, second, third: third?.winner ?? null };
+}
+
+// ---------------------------------------------------------------------------
+// Archivio edizioni
+// ---------------------------------------------------------------------------
+
+export interface ArchivedTournament {
+  id: number;
+  name: string;
+  year: number;
+  /** Nomi delle prime tre squadre; null dove il tabellone non le ha decise. */
+  podium: { first: string | null; second: string | null; third: string | null };
+}
+
+function teamNameById(teamId: number | null): string | null {
+  if (teamId === null) return null;
+  const row = db.prepare("SELECT name FROM teams WHERE id = ?").get(teamId) as
+    | { name: string }
+    | undefined;
+  return row?.name ?? null;
+}
+
+/**
+ * Edizioni concluse, dalla più recente. Lo scoping sta nella query: un torneo
+ * ancora in corso non compare in archivio nemmeno se ha già un podio.
+ *
+ * Legge solo id, nome, anno e i nomi delle squadre sul podio: niente
+ * contact_info del torneo, niente righe dei giocatori.
+ */
+export function listFinishedTournaments(): ArchivedTournament[] {
+  const rows = db
+    .prepare(
+      `SELECT id, name, year FROM tournaments
+       WHERE status = 'finished' ORDER BY year DESC, id DESC`,
+    )
+    .all() as { id: number; name: string; year: number }[];
+
+  return rows.map((t) => {
+    const p = podium(t.id);
+    return {
+      ...t,
+      podium: {
+        first: teamNameById(p.first),
+        second: teamNameById(p.second),
+        third: teamNameById(p.third),
+      },
+    };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Vista pubblica della squadra
+// ---------------------------------------------------------------------------
+
+export interface PublicPlayer {
+  firstName: string;
+  lastName: string;
+  gender: Gender;
+}
+
+export interface PublicStanding extends StandingRow {
+  teamName: string;
+}
+
+export interface TeamPublicView {
+  teamId: number;
+  teamName: string;
+  tournamentName: string;
+  tournamentYear: number;
+  players: PublicPlayer[];
+  matches: MatchView[];
+  group: { name: string; standings: PublicStanding[] } | null;
+}
+
+/**
+ * Vista pubblica di una squadra: null se la squadra non è una squadra
+ * confermata del torneo in corso (edizione passata, ritirata o in attesa di
+ * conferma), così la pagina può rispondere 404 senza altri controlli.
+ *
+ * Il payload contiene solo dati da tabellone: nome squadra, nomi e genere dei
+ * giocatori, partite e classifica. `skill`, `contact` e `age_confirmed` non
+ * vengono nemmeno letti dal DB.
+ */
+export function getTeamPublicView(teamId: number): TeamPublicView | null {
+  const tournament = getActiveTournament();
+  if (!tournament) return null;
+
+  // Lo scoping sta nella query, non nel chiamante: torneo attivo E stato attivo.
+  const team = db
+    .prepare(
+      `SELECT id, name, group_id FROM teams
+       WHERE id = ? AND tournament_id = ? AND status = 'active'`,
+    )
+    .get(teamId, tournament.id) as
+    | { id: number; name: string; group_id: number | null }
+    | undefined;
+  if (!team) return null;
+
+  const players = db
+    .prepare(
+      `SELECT first_name, last_name, gender FROM players
+       WHERE team_id = ? ORDER BY is_reserve, last_name, first_name`,
+    )
+    .all(team.id) as Pick<
+    PlayerRow,
+    "first_name" | "last_name" | "gender"
+  >[];
+
+  const names = new Map<number, string>();
+  for (const t of db
+    .prepare("SELECT id, name FROM teams WHERE tournament_id = ?")
+    .all(tournament.id) as { id: number; name: string }[]) {
+    names.set(t.id, t.name);
+  }
+
+  const sets = allSets(tournament.id);
+  const matches = (
+    db
+      .prepare(
+        `SELECT * FROM matches
+         WHERE tournament_id = ? AND (team_a = ? OR team_b = ?)
+         ORDER BY phase = 'knockout', round, bracket_pos, id`,
+      )
+      .all(tournament.id, team.id, team.id) as MatchRow[]
+  ).map((m) => toMatchView(m, names, sets));
+
+  let group: TeamPublicView["group"] = null;
+  if (team.group_id !== null) {
+    const row = db
+      .prepare("SELECT name FROM groups WHERE id = ?")
+      .get(team.group_id) as { name: string } | undefined;
+    if (row) {
+      group = {
+        name: row.name,
+        standings: groupStandings(team.group_id).map((s) => ({
+          ...s,
+          teamName: names.get(s.teamId) ?? "?",
+        })),
+      };
+    }
+  }
+
+  return {
+    teamId: team.id,
+    teamName: team.name,
+    tournamentName: tournament.name,
+    tournamentYear: tournament.year,
+    players: players.map((p) => ({
+      firstName: p.first_name,
+      lastName: p.last_name,
+      gender: p.gender,
+    })),
+    matches,
+    group,
+  };
 }

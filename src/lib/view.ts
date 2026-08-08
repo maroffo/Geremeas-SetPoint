@@ -1,5 +1,6 @@
 import {
   allSets,
+  getTournament,
   groupStandings,
   groupTeams,
   listGroups,
@@ -19,6 +20,26 @@ export interface MatchView extends MatchRow {
   sets: SetScoreRow[];
   teamAName: string;
   teamBName: string;
+}
+
+/**
+ * Arricchisce una partita con i suoi set e i nomi delle due squadre, risolti
+ * dalla mappa id→nome (placeholder "—" se lo slot è vuoto, "?" se il nome
+ * manca). Helper condiviso da tutte le viste (home, archivio, vista pubblica
+ * della squadra), così la forma di `MatchView` e la logica dei placeholder
+ * vivono in un unico punto.
+ */
+export function toMatchView(
+  m: MatchRow,
+  teamNameById: Map<number, string>,
+  setsByMatch: Map<number, SetScoreRow[]>,
+): MatchView {
+  return {
+    ...m,
+    sets: setsByMatch.get(m.id) ?? [],
+    teamAName: m.team_a !== null ? (teamNameById.get(m.team_a) ?? "?") : "—",
+    teamBName: m.team_b !== null ? (teamNameById.get(m.team_b) ?? "?") : "—",
+  };
 }
 
 export interface GroupView {
@@ -50,12 +71,7 @@ export function buildTournamentView(t: TournamentRow): TournamentView {
   const sets = allSets(t.id);
   const matches = listMatches(t.id);
 
-  const toView = (m: MatchRow): MatchView => ({
-    ...m,
-    sets: sets.get(m.id) ?? [],
-    teamAName: m.team_a !== null ? (names.get(m.team_a) ?? "?") : "—",
-    teamBName: m.team_b !== null ? (names.get(m.team_b) ?? "?") : "—",
-  });
+  const toView = (m: MatchRow): MatchView => toMatchView(m, names, sets);
 
   const groups: GroupView[] = listGroups(t.id).map((g) => ({
     group: g,
@@ -105,6 +121,57 @@ export function buildTournamentView(t: TournamentRow): TournamentView {
   };
 }
 
+export interface ArchiveGroupView {
+  name: string;
+  standings: StandingRow[];
+  matches: MatchView[];
+}
+
+/**
+ * Vista di un'edizione conclusa: le stesse strutture della home meno le righe
+ * che portano dati non pubblici, cioè `tournament` (contact_info) e i
+ * `teams` dei gironi (contact, age_confirmed). Restano nomi delle squadre,
+ * risultati e classifiche.
+ */
+export interface ArchiveView {
+  id: number;
+  name: string;
+  year: number;
+  teamNames: Map<number, string>;
+  groups: ArchiveGroupView[];
+  knockoutRounds: MatchView[][];
+  thirdPlace: MatchView | null;
+  totalKnockoutRounds: number;
+  podium: Podium;
+}
+
+/**
+ * Vista read-only di un'edizione conclusa: null se il torneo non esiste o non
+ * è `finished`, così la pagina può rispondere 404 senza altri controlli. Il
+ * controllo sullo stato precede la costruzione della vista.
+ */
+export function buildArchiveView(tournamentId: number): ArchiveView | null {
+  const t = getTournament(tournamentId);
+  if (!t || t.status !== "finished") return null;
+
+  const view = buildTournamentView(t);
+  return {
+    id: t.id,
+    name: t.name,
+    year: t.year,
+    teamNames: view.teamNames,
+    groups: view.groups.map((g) => ({
+      name: g.group.name,
+      standings: g.standings,
+      matches: g.matches,
+    })),
+    knockoutRounds: view.knockoutRounds,
+    thirdPlace: view.thirdPlace,
+    totalKnockoutRounds: view.totalKnockoutRounds,
+    podium: view.podium,
+  };
+}
+
 export function formatSets(m: MatchView): string {
   if (m.sets.length === 0) return "";
   return m.sets.map((s) => `${s.points_a}-${s.points_b}`).join(", ");
@@ -120,19 +187,26 @@ export function setsWon(m: MatchView): { a: number; b: number } {
   return { a, b };
 }
 
+// Nomi di giorno e mese in italiano, calcolati da componenti UTC espliciti.
+const weekdayMonth = new Intl.DateTimeFormat("it-IT", {
+  timeZone: "UTC",
+  weekday: "short",
+  day: "numeric",
+  month: "short",
+});
+
 export function formatSchedule(m: MatchView): string {
   const parts: string[] = [];
   if (m.scheduled_at) {
-    const d = new Date(m.scheduled_at);
-    parts.push(
-      d.toLocaleString("it-IT", {
-        weekday: "short",
-        day: "numeric",
-        month: "short",
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
-    );
+    // scheduled_at è naive "YYYY-MM-DDTHH:MM" (ora di parete a Roma): niente
+    // `new Date(<stringa>)`, che la leggerebbe come UTC spostando gli orari
+    // (vedi clock.ts). L'ora si prende tale e quale dalla stringa; per il solo
+    // nome di giorno/mese si costruisce una data da componenti UTC espliciti
+    // formattata in UTC, quindi indipendente dal fuso del server.
+    const [date, time] = m.scheduled_at.split("T");
+    const [year, month, day] = date.split("-").map(Number);
+    const label = weekdayMonth.format(new Date(Date.UTC(year, month - 1, day)));
+    parts.push(`${label}, ${time}`);
   }
   // Il nome del campo è libero (es. "Campo Mare"): niente prefisso fisso.
   if (m.court) parts.push(m.court);

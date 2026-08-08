@@ -8,3 +8,6 @@ data/
 .env*.local
 next-env.d.ts
 tsconfig.tsbuildinfo
+test-results
+playwright-report
+quality_reports/reviews/

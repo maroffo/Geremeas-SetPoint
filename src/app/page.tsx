@@ -1,5 +1,7 @@
 import Link from "next/link";
+import { AutoRefresh } from "@/components/AutoRefresh";
 import { Bracket } from "@/components/Bracket";
+import { ContactLinks } from "@/components/ContactLinks";
 import { MatchLine } from "@/components/MatchLine";
 import { StandingsTable } from "@/components/StandingsTable";
 import {
@@ -61,6 +63,7 @@ export default function HomePage() {
 
   return (
     <div className="space-y-6">
+      <AutoRefresh />
       <div className="rounded-xl bg-gradient-to-r from-sky-700 to-cyan-600 p-6 text-white shadow">
         <h1 className="text-2xl font-bold">
           {tournament.name} {tournament.year}
@@ -104,7 +107,7 @@ export default function HomePage() {
             {tournament.contact_info && (
               <div className="whitespace-pre-line text-sm text-stone-700">
                 <div className="mb-1 font-medium">Per info e iscrizioni:</div>
-                {tournament.contact_info}
+                <ContactLinks text={tournament.contact_info} />
               </div>
             )}
           </div>
@@ -175,6 +178,7 @@ export default function HomePage() {
               <StandingsTable
                 standings={g.standings}
                 teamNames={view.teamNames}
+                linkTeams
                 highlight={
                   tournament.format === "groups_only"
                     ? 0
@@ -204,7 +208,15 @@ export default function HomePage() {
             ) : (
               <ul className="space-y-1 text-sm">
                 {activeTeams.map((t) => (
-                  <li key={t.id}>✅ {t.name}</li>
+                  <li key={t.id}>
+                    ✅{" "}
+                    <Link
+                      href={`/squadra/${t.id}`}
+                      className="font-medium text-sky-700 hover:underline"
+                    >
+                      {t.name}
+                    </Link>
+                  </li>
                 ))}
                 {pendingTeams.map((t) => (
                   <li key={t.id} className="text-stone-500">

@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { FormMessages } from "@/components/FormMessages";
-import { isAdmin } from "@/lib/auth";
+import { currentRole } from "@/lib/auth";
 import { loginAction } from "../actions";
 
 export const dynamic = "force-dynamic";
@@ -10,7 +10,8 @@ export default async function AdminLoginPage({
 }: {
   searchParams: Promise<{ error?: string }>;
 }) {
-  if (await isAdmin()) redirect("/admin");
+  const role = await currentRole();
+  if (role) redirect(role === "admin" ? "/admin" : "/admin/partite");
   const params = await searchParams;
 
   return (

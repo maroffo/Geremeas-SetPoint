@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { loginAdmin, logoutAdmin, requireAdmin } from "@/lib/auth";
+import { loginAdmin, logoutAdmin, requireAdmin, requireScorer } from "@/lib/auth";
 import * as repo from "@/lib/repo";
 import type { SetInput, TournamentFormat, TournamentStatus } from "@/lib/types";
 
@@ -11,9 +11,14 @@ function errorMessage(e: unknown): string {
 }
 
 function done(back: string, error: string | null): never {
-  // back arriva da campi hidden: si accettano solo path interni,
-  // mai URL assoluti (open redirect).
-  const safeBack = back.startsWith("/") && !back.startsWith("//") ? back : "/admin";
+  // back arriva da campi hidden: si accettano solo path interni, mai URL
+  // assoluti (open redirect). Oltre a "//" si rifiuta anche "/\": i browser
+  // normalizzano il backslash a "/", quindi "/\evil.com" diventa
+  // protocol-relative verso un host esterno.
+  const safeBack =
+    back.startsWith("/") && !back.startsWith("//") && !back.startsWith("/\\")
+      ? back
+      : "/admin";
   revalidatePath("/");
   redirect(error ? `${safeBack}?error=${encodeURIComponent(error)}` : safeBack);
 }
@@ -24,8 +29,9 @@ function done(back: string, error: string | null): never {
 
 export async function loginAction(formData: FormData): Promise<void> {
   const pin = String(formData.get("pin") ?? "");
-  const ok = await loginAdmin(pin);
-  redirect(ok ? "/admin" : "/admin/login?error=PIN%20errato");
+  const role = await loginAdmin(pin);
+  if (!role) redirect("/admin/login?error=PIN%20errato");
+  redirect(role === "admin" ? "/admin" : "/admin/partite");
 }
 
 export async function logoutAction(): Promise<void> {
@@ -159,6 +165,22 @@ export async function generateScheduleAction(formData: FormData): Promise<void> 
     const { placed, unplaced } = repo.generateSchedule(tournamentId);
     if (unplaced > 0)
       error = `Calendario parziale: ${placed} partite programmate, ${unplaced} senza posto. Aggiungi giornate o campi, oppure allunga gli orari.`;
+  } catch (e) {
+    error = errorMessage(e);
+  }
+  done("/admin/partite", error);
+}
+
+export async function fillScheduleGapsAction(formData: FormData): Promise<void> {
+  await requireAdmin();
+  const tournamentId = Number(formData.get("tournamentId"));
+  let error: string | null = null;
+  try {
+    const { placed, unplaced } = repo.fillScheduleGaps(tournamentId);
+    if (unplaced > 0)
+      error = `Calendario parziale: ${placed} partite programmate, ${unplaced} senza posto dopo l'ultima partita già in calendario. Aggiungi giornate o campi.`;
+    else if (placed === 0)
+      error = "Nessuna partita da programmare: hanno già tutte un orario.";
   } catch (e) {
     error = errorMessage(e);
   }
@@ -315,7 +337,7 @@ export async function generateGroupsAction(formData: FormData): Promise<void> {
 }
 
 export async function saveScoreAction(formData: FormData): Promise<void> {
-  await requireAdmin();
+  await requireScorer();
   const matchId = Number(formData.get("matchId"));
   const sets: SetInput[] = [];
   for (let i = 1; i <= 3; i++) {
@@ -333,7 +355,7 @@ export async function saveScoreAction(formData: FormData): Promise<void> {
 }
 
 export async function forfeitAction(formData: FormData): Promise<void> {
-  await requireAdmin();
+  await requireScorer();
   const matchId = Number(formData.get("matchId"));
   const teamId = Number(formData.get("teamId"));
   let error: string | null = null;
@@ -346,7 +368,7 @@ export async function forfeitAction(formData: FormData): Promise<void> {
 }
 
 export async function clearScoreAction(formData: FormData): Promise<void> {
-  await requireAdmin();
+  await requireScorer();
   const matchId = Number(formData.get("matchId"));
   let error: string | null = null;
   try {
