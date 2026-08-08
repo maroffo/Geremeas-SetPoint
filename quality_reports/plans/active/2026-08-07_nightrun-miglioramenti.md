@@ -85,7 +85,7 @@ Append-only after this point. The implementing session does NOT relitigate; exec
 - [ ] W7.2 Uptime check Cloud Monitoring su https://setpoint.wishew.com/ + notification channel email + alert policy. Evidenza: describe del check.
 
 ### W8 - Playwright full-flow (no deploy)
-- [ ] W8.1 Dipendenza dev @playwright/test + chromium; spec unico: iscrivi 4 squadre (con dichiarazione età se richiesta) → admin conferma → genera gironi → genera calendario → inserisci tutti i punteggi → genera tabellone → punteggi → verifica podio in home. Server standalone su porta dedicata con DB temporaneo (pattern di scripts/e2e-smoke.sh). Target `make test-e2e-full`; NON entra in `check`.
+- [x] W8.1 Dipendenza dev @playwright/test + chromium; spec unico: iscrivi 4 squadre (con dichiarazione età se richiesta) → admin conferma → genera gironi → genera calendario → inserisci tutti i punteggi → genera tabellone → punteggi → verifica podio in home. Server standalone su porta dedicata con DB temporaneo (pattern di scripts/e2e-smoke.sh). Target `make test-e2e-full`; NON entra in `check`.
 
 ### W9 - docs + follow-ups
 - [ ] W9.1 deploy/README.md aggiornato (SCOREKEEPER_PIN, uptime check, riempi-buchi vs genera); README utente (pagina squadra, storico); tech-debt.md: rimossa la riga rigenerazione (chiusa da W5), aggiunta eventuale coda.
@@ -142,7 +142,7 @@ La matrice è l'unione di: (superfici nuove del run) × (happy path + il loro ed
 - [x] W6.1 archivio edizioni (2026-08-08: `npm test` 166/166, `npx next typegen && npx tsc --noEmit` pulito, `make test-e2e` verde, probe HTTP dello storico verde)
 - [ ] W6.2 deploy D
 - [ ] W7 operatività
-- [ ] W8 Playwright
+- [x] W8.1 Playwright full-flow (2026-08-08: `make test-e2e-full` verde da build pulita in 7,6s, `npm test` 166/166, `npx next typegen && npx tsc --noEmit` pulito, `make test-e2e` smoke verde)
 - [ ] W9 docs + follow-ups
 - [ ] Review round + fixes
 - [ ] PR + SCORE
@@ -309,6 +309,54 @@ torneo concluso: 1, torneo in corso: 2
 PROBE OK: /storico lista solo i finished, dettaglio 200 e pulito, 404 su torneo in corso/id ignoto, link in home
 ```
 
+### W8.1 Playwright full-flow (2026-08-08)
+
+Il flusso del brief ("iscrivi 4 squadre → login admin → conferma") **non è
+eseguibile in quest'ordine**: `/iscrizione/squadra` risponde "Iscrizioni chiuse"
+finché non esiste un torneo in stato `registration`, e il torneo lo crea
+l'admin. Lo spec quindi apre con login e creazione del torneo (con `min_age`
+16, così il form d'iscrizione mostra davvero la dichiarazione d'età), e solo
+dopo le quattro squadre si iscrivono da un contesto browser separato, senza
+cookie di sessione: è anche la verifica che l'iscrizione è pubblica per
+davvero.
+
+Due trappole di sincronizzazione, entrambe dovute alle server action che
+rispondono con un redirect:
+
+- riempire due volte lo stesso form in un `for` perde il secondo invio (il
+  `fill` arriva sul DOM uscente). Ogni iterazione ora chiude con l'asserzione
+  sul conteggio atteso, che è insieme attesa e verifica: la prima versione
+  aggiungeva una sola giornata su due e il test se ne accorgeva solo dopo.
+- il progresso dei punteggi si conta sui bottoni "annulla risultato": ce n'è
+  esattamente uno per partita giocata, quindi `toHaveCount(n+1)` dopo ogni
+  salvataggio aspetta la navigazione e prova il salvataggio con una sola
+  asserzione.
+
+`vitest.config.mts` ha dovuto escludere `e2e/**`: il default include di vitest
+raccoglie `**/*.spec.ts` e avrebbe eseguito lo spec Playwright fuori dal suo
+runner, rompendo `npm test`.
+
+Evidenza della run completa (build pulita, `rm -rf .next` prima del target):
+
+```
+Running 1 test using 1 worker
+  ✓  1 [chromium] › e2e/full-flow.spec.ts:52:5 › dall'iscrizione delle squadre al podio in home (1.9s)
+  1 passed (7.3s)
+```
+
+Il database temporaneo lasciato dalla run mostra che il flusso è arrivato in
+fondo davvero (torneo `finished`, 4 squadre `active` con `age_confirmed=1`, 8
+giocatori, 2 giornate, 2 campi, 6 partite `finished`, 12 set), e conferma sul
+campo il riposo di W3 + W5: le semifinali finiscono alle **19:20**, non alle
+18:40, perché il cuscinetto `busyBefore` evita alle qualificate di rientrare
+nello slot subito dopo il girone.
+
+```
+group    18:00 Campo 1 | group    18:00 Campo 2
+knockout 19:20 Campo 1 | knockout 19:20 Campo 2     (semifinali, +1 slot di riposo)
+knockout 10/08 18:00   | knockout 10/08 18:00       (finale e finalina)
+```
+
 ## Decisions
 (append-only; execution-time decisions land here)
 
@@ -352,6 +400,12 @@ PROBE OK: /storico lista solo i finished, dettaglio 200 e pulito, 404 su torneo 
 | 48 | (W6.1) Classifiche d'archivio senza `linkTeams` | le classifiche del dettaglio mostrano i nomi come testo, non come link a `/squadra/[id]` | quella pagina è scoped al torneo attivo (decisione 20): in archivio ogni link sarebbe un 404 garantito | nasce una pagina squadra per le edizioni passate |
 | 49 | (W6.1) Podio di un torneo senza tabellone | resta vuoto: `podium()` legge solo partite knockout e non si deduce il vincitore dalle classifiche | con più gironi il primo assoluto è ambiguo; la home si comporta già così, e un podio inventato in archivio resterebbe lì per sempre | i tornei `groups_only` diventano la norma e serve un criterio di classifica generale |
 | 50 | (W6.1) Dove sta il link allo storico | nel footer del root layout (`src/app/layout.tsx`), quindi su tutte le pagine pubbliche, non dentro `page.tsx` | la home non ha un footer proprio e il torneo in corso occupa già tutto il corpo: il footer è l'unica zona che resta raggiungibile anche a torneo iniziato | l'archivio merita una voce di navigazione in testata |
+| 51 | (W8.1) Ordine reale del full-flow | login admin e creazione torneo PRIMA delle iscrizioni pubbliche, non dopo come nel brief | senza un torneo in stato `registration` la pagina d'iscrizione risponde "Iscrizioni chiuse": l'ordine del brief non è eseguibile, e questo è anche l'ordine reale di un'edizione | l'app acquisisce un seeding o un torneo di default |
+| 52 | (W8.1) Chi visita le pagine pubbliche | un `browser.newContext()` separato per iscrizioni, home e podio; la sessione admin resta nel contesto principale | provare il flusso pubblico con il cookie admin addosso non proverebbe che è pubblico; due contesti costano una riga e coprono anche il caso "il visitatore vede il podio" | serve simulare l'organizzatore che si iscrive dal proprio telefono |
+| 53 | (W8.1) Forma del torneo sotto test | 4 squadre 2x2 in 2 gironi da 2, non 1 girone da 4 | con 4 squadre si sceglie tra un girone ricco e un tabellone vero: il tabellone (semifinali → propagazione → finale + finalina → podio completo) è la parte che i test unitari coprono meno end-to-end, ed è la zona del bugfix W1 | lo spec passa a 6+ squadre e può avere entrambi |
+| 54 | (W8.1) Come si aspetta una server action | ogni click chiude con l'asserzione sullo stato atteso (conteggi di "annulla risultato", di righe giornata, di badge) invece di `waitForLoadState`/`networkidle` | l'`expect` con retry è insieme sincronizzazione e verifica: senza, il fill successivo finisce sul DOM uscente (bug osservato: una sola giornata aggiunta su due) | Next espone un segnale esplicito di fine azione |
+| 55 | (W8.1) Database del server sotto test | ricreato vuoto all'**avvio** dello script (`rm -rf` + `mkdir`), non ripulito alla fine | il cleanup a fine run non scatta se Playwright uccide il webServer o se la run viene interrotta: pulire in ingresso garantisce lo stato iniziale "nessun torneo" che è la prima asserzione dello spec | si vogliono run parallele sulla stessa macchina (servirebbe una dir per run) |
+| 56 | (W8.1) `e2e/**` escluso da vitest | `exclude: [...configDefaults.exclude, "e2e/**"]` in vitest.config.mts | il default include di vitest raccoglie `**/*.spec.ts`: senza l'esclusione `npm test` proverebbe a eseguire lo spec Playwright fuori dal suo runner | gli spec e2e cambiano suffisso |
 
 ## Outcomes & Retrospective
 (fill at close)
