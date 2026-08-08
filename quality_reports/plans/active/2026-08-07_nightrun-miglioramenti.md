@@ -72,8 +72,8 @@ Append-only after this point. The implementing session does NOT relitigate; exec
 - [ ] W4.4 Deploy C, re-login verificato in prod con entrambi i PIN, PIN segnapunti riportato a Max.
 
 ### W5 - calendario: riempi-buchi + timezone
-- [ ] W5.1 Helper `nowInRome()` + `todayInRome()` (decisione 6) in scheduler.ts o lib dedicata; unit test DST (2026-03-29, 2026-10-25) con clock iniettabile.
-- [ ] W5.2 repo.fillScheduleGaps(tournamentId): pending con scheduled_at NULL, blocchi come oggi, MA slot disponibili = quelli strettamente successivi all'ultimo slot occupato (max su scheduled_at di partite played+scheduled del torneo) e comunque > nowInRome(); nessun clear. Azione admin "Completa calendario" accanto a "Genera": Genera resta full con testo "da usare a torneo non iniziato". Test: partite giocate intatte, nuove partite solo in coda, niente collisioni campo+orario, niente orari passati.
+- [x] W5.1 Helper `nowInRome()` + `todayInRome()` (decisione 6) in scheduler.ts o lib dedicata; unit test DST (2026-03-29, 2026-10-25) con clock iniettabile.
+- [x] W5.2 repo.fillScheduleGaps(tournamentId): pending con scheduled_at NULL, blocchi come oggi, MA slot disponibili = quelli strettamente successivi all'ultimo slot occupato (max su scheduled_at di partite played+scheduled del torneo) e comunque > nowInRome(); nessun clear. Azione admin "Completa calendario" accanto a "Genera": Genera resta full con testo "da usare a torneo non iniziato". Test: partite giocate intatte, nuove partite solo in coda, niente collisioni campo+orario, niente orari passati.
 - [ ] W5.3 Deploy B (W3+W5 insieme) + verifica prod.
 
 ### W6 - archivio edizioni (deploy D con W6 finale)
@@ -137,7 +137,8 @@ La matrice è l'unione di: (superfici nuove del run) × (happy path + il loro ed
 - [x] W3.1-W3.2 riposo scheduler (2026-08-08: `npm test` 119/119, `tsc --noEmit` pulito, `make test-e2e` verde)
 - [x] W4.1-W4.2 sessioni + ruoli (2026-08-08: `npm test` 136/136, `tsc --noEmit` pulito, `make test-e2e` verde con le nuove probe di sessione)
 - [ ] W4.3-W4.4 secret SCOREKEEPER_PIN + deploy C
-- [ ] W5 riempi-buchi/timezone + deploy B
+- [x] W5.1-W5.2 riempi-buchi + timezone (2026-08-08: `npm test` 157/157, `npx next typegen && npx tsc --noEmit` pulito, `make test-e2e` verde, probe di rendering sulla pagina partite verde)
+- [ ] W5.3 deploy B (W3+W5)
 - [ ] W6 archivio + deploy D
 - [ ] W7 operatività
 - [ ] W8 Playwright
@@ -227,6 +228,50 @@ Il progetto **non aveva un `vitest.config`**: senza alias `@/` nessun test potev
 
 Limite noto e accettato del lockout: vive in memoria, quindi un riavvio dell'istanza Cloud Run azzera i contatori. Con `--max-instances 1` è corretto rispetto alla concorrenza, non alla persistenza; il lockout persistente su DB era già fuori scope (riga "Out of scope stanotte").
 
+### W5 riempi-buchi + timezone (2026-08-08)
+
+I due cambi d'ora del 2026 si comportano in modo diverso e i test li asseriscono
+entrambi in modo esplicito (istante UTC → ora di parete a Roma):
+
+```
+2026-03-29T00:30Z → "2026-03-29T01:30"   (CET, +1)
+2026-03-29T01:30Z → "2026-03-29T03:30"   (CEST, +2: le 02:30 locali non esistono)
+2026-10-25T00:30Z → "2026-10-25T02:30"   (CEST, +2)
+2026-10-25T01:30Z → "2026-10-25T02:30"   (CET, +1: la stessa ora di parete due volte)
+```
+
+La sorpresa utile è la seconda coppia: a ottobre due istanti diversi danno la
+**stessa** stringa. Non è un difetto dell'helper, è l'ora di parete: e siccome
+`scheduled_at` è anch'esso ora di parete, il confronto lessicale resta corretto
+proprio perché entrambi i lati vivono nella stessa ambiguità. Un'ora ripetuta
+nel mezzo di una notte d'ottobre non tocca un torneo che gioca di pomeriggio, e
+qualunque tentativo di disambiguare (offset, UTC) richiederebbe di cambiare
+anche il formato salvato: il piano lo esclude.
+
+Il riempi-buchi ha reso visibile un buco del riposo che il full-regenerate non
+poteva avere: la nuova generazione parte da uno slot **attaccato** all'ultimo
+già occupato, e le squadre di quello slot non sono in `teamsBySlot` (le loro
+partite non sono in questa passata). Senza correzione, in un torneo con l'ultimo
+round alle 19:20 le partite completate finivano alle 20:00, cioè esattamente il
+back-to-back che W3 aveva tolto. Rimediato con un sesto parametro opzionale
+`busyBefore` su `buildSchedule` (decisione 43): il chiamante lo passa solo se il
+primo slot libero è davvero adiacente all'ultimo occupato, e da lì il cuscinetto
+e il lookahead esistenti fanno il resto. Con il fix, le stesse partite vanno
+alle 20:40.
+
+La finestra utilizzabile si ottiene tagliando le **giornate**, non filtrando gli
+slot dentro `buildSchedule` (decisione 40): `daysAfter` sposta l'inizio della
+giornata in corso di un multiplo esatto di `match_minutes`, quindi la griglia
+oraria resta quella del calendario completo e le partite aggiunte in corsa
+cadono sugli stessi orari che avrebbero avuto da una generazione da zero.
+
+Evidenza di rendering (server standalone, DB seedato con un torneo in stato
+`groups`, una partita in calendario e una senza orario):
+
+```
+PROBE OK: admin vede Completa calendario + Genera con avviso, segnapunti no
+```
+
 ## Decisions
 (append-only; execution-time decisions land here)
 
@@ -257,6 +302,14 @@ Limite noto e accettato del lockout: vive in memoria, quindi un riavvio dell'ist
 | 35 | (W4.2) Firma di `requireScorer` | restituisce il `Role`, non `void` come `requireAdmin` | la pagina partite deve sapere se nascondere i comandi di gestione: senza il valore di ritorno servirebbe una seconda lettura del cookie e una seconda query sulla sessione per ogni render | il ruolo serve a così tante pagine da giustificare un contesto condiviso |
 | 36 | (W4.1) `verifyPin` rimosso | sostituito da `roleForPin(pin): Role \| null` (nessun chiamante fuori dai test) | con due PIN un booleano non basta e tenerne due (verifyPin + roleForPin) inviterebbe a controllare quello sbagliato | torna un solo PIN |
 | 37 | (W4.2) Come si testano le action | `vitest.config.mts` con alias `@` + `redirect()` mockato che **lancia**, action eseguite davvero su DB temporaneo | è l'unico modo di provare che il segnapunti non crea tornei: un mock di `redirect` che non interrompe farebbe passare il test anche con la guardia bypassata | Next espone un modo supportato di invocare le action fuori dal server |
+| 38 | (W5.1) Dove vive l'orologio | `src/lib/clock.ts`, non dentro `scheduler.ts` | lo scheduler è fatto di funzioni pure e non deve avere un "adesso": tenerlo fuori è ciò che rende i suoi test deterministici senza mock | serve l'ora di Roma anche in un contesto senza accesso a moduli condivisi |
+| 39 | (W5.1) Forma del clock iniettabile | parametro `at: Date = new Date()` su `nowInRome`/`todayInRome` e su `fillScheduleGaps`, non un'interfaccia `Clock` da iniettare | un default esplicito basta a fissare l'istante nei test e non obbliga nessun chiamante a trasportare una dipendenza; l'interfaccia sarebbe astrazione speculativa per un solo uso | serve congelare il tempo per un intero albero di chiamate |
+| 40 | (W5.2) Come si ottiene la finestra utilizzabile | `daysAfter(days, matchMinutes, after)` taglia le giornate PRIMA di `buildSchedule`, invece di filtrare gli slot dentro lo scheduler | lo scheduler resta identico per il full-regenerate, la matematica degli slot resta in un solo posto, e l'inizio si sposta solo di multipli di `match_minutes`, quindi gli orari coincidono con quelli di una generazione da zero | si vogliono finestre di indisponibilità in mezzo a una giornata (buchi, non solo un taglio iniziale) |
+| 41 | (W5.2) Cos'è "l'ultimo slot occupato" | massimo lessicale di `scheduled_at` su TUTTE le partite del torneo con un orario (giocate, forfait e solo programmate), non solo su quelle giocate | una partita programmata alle 20:00 e non ancora giocata occupa comunque campo e orario; partendo strettamente dopo il massimo, la collisione campo+orario con l'esistente diventa impossibile per costruzione, senza confrontare i campi uno a uno | si vuole riempire anche i buchi *interni* al calendario (allora serve il modello per-campo del follow-up W9.2a) |
+| 42 | (W5.2) Pavimento degli slot nuovi | massimo tra ultimo slot occupato e `nowInRome()`, confronto lessicale su stringhe naive | i due vincoli sono indipendenti (un torneo in ritardo ha l'ultimo slot nel passato, uno appena iniziato ce l'ha nel futuro) e il massimo li soddisfa entrambi con un solo confronto | gli orari salvati smettono di essere ora di parete di Roma |
+| 43 | (W5.2) Riposo oltre il bordo della generazione | sesto parametro opzionale `busyBefore` su `buildSchedule` con le squadre dell'ultimo slot occupato; il chiamante lo passa solo se il primo slot libero gli è adiacente | senza, il riempi-buchi rimetteva in campo allo slot successivo squadre appena scese (vedi Surprises W5): sarebbe stata una regressione silenziosa proprio della garanzia introdotta da W3, e solo nel percorso usato a torneo in corso | si passa a un modello per-campo che conosce già l'occupazione reale |
+| 44 | (W5.2) Finestra esaurita vs configurazione mancante | nessuno slot residuo → ritorno onesto `{placed: 0, unplaced: n}` senza toccare nulla; giornate o campi assenti → eccezione con messaggio | la finestra esaurita è uno stato legittimo del torneo (l'admin decide se aggiungere una giornata), l'assenza di giornate è una configurazione incompleta da segnalare subito | l'interfaccia distingue i due casi con un messaggio proprio invece che con il conteggio |
+| 45 | (W5.2) Nessun ramo di clear in `fillScheduleGaps` | la funzione non ha proprio l'istruzione che cancella orari: solo `UPDATE` sulle partite senza orario | è la differenza sostanziale con `generateSchedule` a torneo in corso, e va garantita dalla forma del codice, non dalla disciplina di chi lo chiama | serve un "risistema da qui in poi" che sposti anche partite già programmate |
 
 ## Outcomes & Retrospective
 (fill at close)

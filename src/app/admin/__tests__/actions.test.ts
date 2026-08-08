@@ -108,6 +108,14 @@ function setupMatch(): number {
   return repo.listMatches(tournamentId).filter((m) => m.round === 1)[0].id;
 }
 
+/** Lo stesso torneo con una giornata e un campo, pronto per il calendario. */
+function withDaysAndCourt(): number {
+  const tournamentId = repo.getMatch(setupMatch())!.tournament_id;
+  repo.addDay(tournamentId, "2099-08-10", "18:00", "21:20");
+  repo.addCourt(tournamentId, "Campo 1");
+  return tournamentId;
+}
+
 const twoZero = { set1a: 21, set1b: 10, set2a: 21, set2b: 12 };
 
 describe("segnapunti", () => {
@@ -165,6 +173,19 @@ describe("segnapunti", () => {
     expect(repo.getMatch(matchId)!.court).toBeNull();
     expect(repo.getMatch(matchId)!.scheduled_at).toBeNull();
   });
+
+  it("non può completare il calendario", async () => {
+    const tournamentId = withDaysAndCourt();
+    const matchId = repo.listMatches(tournamentId)[0].id;
+    await loginAs("scorekeeper");
+
+    const to = await redirectOf(
+      actions.fillScheduleGapsAction(form({ tournamentId })),
+    );
+
+    expect(to).toBe("/admin/partite");
+    expect(repo.getMatch(matchId)!.scheduled_at).toBeNull();
+  });
 });
 
 describe("admin", () => {
@@ -184,6 +205,19 @@ describe("admin", () => {
 
     await redirectOf(actions.saveScoreAction(form({ matchId, ...twoZero })));
     expect(repo.getMatch(matchId)!.status).toBe("finished");
+  });
+
+  it("completa il calendario delle partite senza orario", async () => {
+    const tournamentId = withDaysAndCourt();
+    const matchId = repo.listMatches(tournamentId)[0].id;
+    await loginAs("admin");
+
+    const to = await redirectOf(
+      actions.fillScheduleGapsAction(form({ tournamentId })),
+    );
+
+    expect(to).toBe("/admin/partite");
+    expect(repo.getMatch(matchId)!.scheduled_at).toBe("2099-08-10T18:00");
   });
 });
 

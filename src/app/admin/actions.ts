@@ -166,6 +166,22 @@ export async function generateScheduleAction(formData: FormData): Promise<void> 
   done("/admin/partite", error);
 }
 
+export async function fillScheduleGapsAction(formData: FormData): Promise<void> {
+  await requireAdmin();
+  const tournamentId = Number(formData.get("tournamentId"));
+  let error: string | null = null;
+  try {
+    const { placed, unplaced } = repo.fillScheduleGaps(tournamentId);
+    if (unplaced > 0)
+      error = `Calendario parziale: ${placed} partite programmate, ${unplaced} senza posto dopo l'ultima partita già in calendario. Aggiungi giornate o campi.`;
+    else if (placed === 0)
+      error = "Nessuna partita da programmare: hanno già tutte un orario.";
+  } catch (e) {
+    error = errorMessage(e);
+  }
+  done("/admin/partite", error);
+}
+
 export async function updateTeamContactAction(formData: FormData): Promise<void> {
   await requireAdmin();
   const teamId = Number(formData.get("teamId"));

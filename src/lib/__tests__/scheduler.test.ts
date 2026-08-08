@@ -1,9 +1,11 @@
 // ABOUTME: Test dello scheduler: capienza per giornata, blocchi paralleli sui campi,
-// ABOUTME: rotazione dei campi, sforo sul giorno dopo, capienza insufficiente e riposo
+// ABOUTME: rotazione dei campi, sforo sul giorno dopo, capienza, riposo e finestra utile
 
 import { describe, expect, it } from "vitest";
 import {
   buildSchedule,
+  daysAfter,
+  isAdjacentSlot,
   type Assignment,
   type DaySlot,
   type ScheduleBlock,
@@ -351,5 +353,122 @@ describe("buildSchedule: riposo tra le partite", () => {
         backToBack(senzaRiposo.assignments, teamsByMatch, minutes).length,
       );
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Finestra utilizzabile (calendario completato a torneo iniziato)
+// ---------------------------------------------------------------------------
+
+describe("daysAfter", () => {
+  it("taglia le giornate consumate e fa ripartire quella in corso", () => {
+    // 18:00-20:30 con slot da 40': 18:00, 18:40, 19:20, 20:00
+    const kept = daysAfter(days, 40, "2026-08-10T18:40");
+    expect(kept.map((d) => `${d.date} ${d.startTime}`)).toEqual([
+      "2026-08-10 19:20",
+      "2026-08-11 18:00",
+      "2026-08-12 17:00",
+    ]);
+  });
+
+  it("resta sulla griglia originale, così gli orari non slittano", () => {
+    // Un istante a metà slot non sposta la griglia: si riparte da quello dopo.
+    const kept = daysAfter(days, 40, "2026-08-10T18:55");
+    const { assignments } = buildSchedule(
+      kept,
+      courts,
+      40,
+      [{ matchIds: [1] }],
+      noTeams,
+    );
+    expect(assignments[0].scheduledAt).toBe("2026-08-10T19:20");
+  });
+
+  it("scarta le giornate del tutto passate e non ne inventa di nuove", () => {
+    expect(daysAfter(days, 40, "2026-08-11T20:00").map((d) => d.date)).toEqual([
+      "2026-08-12",
+    ]);
+    expect(daysAfter(days, 40, "2026-08-12T23:59")).toEqual([]);
+    expect(daysAfter([], 40, "2026-08-10T18:00")).toEqual([]);
+  });
+
+  it("tiene tutta la giornata quando il taglio precede il suo inizio", () => {
+    expect(daysAfter(days, 40, "2026-08-10T09:00")[0]).toEqual(days[0]);
+  });
+
+  it("rifiuta una durata partita assurda invece di ciclare a vuoto", () => {
+    expect(() => daysAfter(days, 0, "2026-08-10T18:00")).toThrow(/durata/);
+  });
+});
+
+describe("isAdjacentSlot", () => {
+  it("vale solo a parità di giornata e a esattamente uno slot di distanza", () => {
+    expect(isAdjacentSlot("2026-08-10T18:00", "2026-08-10T18:40", 40)).toBe(true);
+    expect(isAdjacentSlot("2026-08-10T18:00", "2026-08-10T19:20", 40)).toBe(false);
+    expect(isAdjacentSlot("2026-08-10T20:00", "2026-08-11T18:00", 40)).toBe(false);
+  });
+});
+
+describe("buildSchedule: riposo oltre il bordo della generazione", () => {
+  const teamsByMatch: TeamsByMatch = new Map([
+    [1, [1, 2]],
+    [2, [3, 4]],
+  ]);
+
+  it("non rimanda in campo chi ha giocato nello slot precedente", () => {
+    const oneDay: DaySlot[] = [
+      { date: "2026-08-10", startTime: "19:20", endTime: "21:20" }, // 3 slot
+    ];
+    const { assignments } = buildSchedule(
+      oneDay,
+      ["Campo 1"],
+      40,
+      [{ matchIds: [1] }, { matchIds: [2] }],
+      teamsByMatch,
+      new Set([1, 2]), // 1 e 2 hanno giocato nello slot delle 18:40
+    );
+    const byMatch = new Map(assignments.map((a) => [a.matchId, a.scheduledAt]));
+    expect(byMatch.get(1)).toBe("2026-08-10T20:00"); // cuscinetto: 19:20 saltato
+    expect(byMatch.get(2)).toBe("2026-08-10T20:40");
+  });
+
+  it("rinuncia al cuscinetto se costerebbe una partita", () => {
+    const oneDay: DaySlot[] = [
+      { date: "2026-08-10", startTime: "19:20", endTime: "20:40" }, // 2 slot
+    ];
+    const { assignments, unplacedMatchIds } = buildSchedule(
+      oneDay,
+      ["Campo 1"],
+      40,
+      [{ matchIds: [1] }, { matchIds: [2] }],
+      teamsByMatch,
+      new Set([1, 2]),
+    );
+    expect(unplacedMatchIds).toEqual([]);
+    expect(assignments.map((a) => a.scheduledAt)).toEqual([
+      "2026-08-10T19:20",
+      "2026-08-10T20:00",
+    ]);
+  });
+
+  it("riordina il blocco invece di sprecare uno slot, quando può", () => {
+    const oneDay: DaySlot[] = [
+      { date: "2026-08-10", startTime: "19:20", endTime: "21:20" },
+    ];
+    const mixed: TeamsByMatch = new Map([
+      [1, [1, 2]], // hanno appena giocato
+      [2, [5, 6]], // riposate
+    ]);
+    const { assignments } = buildSchedule(
+      oneDay,
+      ["Campo 1"],
+      40,
+      [{ matchIds: [1, 2] }],
+      mixed,
+      new Set([1, 2]),
+    );
+    const byMatch = new Map(assignments.map((a) => [a.matchId, a.scheduledAt]));
+    expect(byMatch.get(2)).toBe("2026-08-10T19:20");
+    expect(byMatch.get(1)).toBe("2026-08-10T20:00");
   });
 });

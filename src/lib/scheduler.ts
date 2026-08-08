@@ -66,11 +66,68 @@ function toMinutes(hhmm: string): number {
   return h * 60 + m;
 }
 
-function slotTime(day: DaySlot, index: number, matchMinutes: number): string {
+function slotStart(day: DaySlot, index: number, matchMinutes: number): string {
   const minutes = toMinutes(day.startTime) + index * matchMinutes;
   const h = String(Math.floor(minutes / 60)).padStart(2, "0");
   const m = String(minutes % 60).padStart(2, "0");
-  return `${day.date}T${h}:${m}`;
+  return `${h}:${m}`;
+}
+
+function slotTime(day: DaySlot, index: number, matchMinutes: number): string {
+  return `${day.date}T${slotStart(day, index, matchMinutes)}`;
+}
+
+function slotCount(day: DaySlot, matchMinutes: number): number {
+  const span = toMinutes(day.endTime) - toMinutes(day.startTime);
+  return Math.max(0, Math.floor(span / matchMinutes));
+}
+
+/**
+ * Giornate ridotte ai soli slot strettamente successivi a `after`
+ * ("YYYY-MM-DDTHH:MM"): le giornate già consumate spariscono, quella in corso
+ * riparte dal primo slot libero. L'inizio si sposta solo di multipli di
+ * `matchMinutes`, quindi la griglia resta quella del calendario completo e gli
+ * orari prodotti coincidono con quelli che avrebbe generato una generazione
+ * da zero.
+ */
+export function daysAfter(
+  days: DaySlot[],
+  matchMinutes: number,
+  after: string,
+): DaySlot[] {
+  if (!isValidMatchMinutes(matchMinutes))
+    throw new Error(
+      `La durata di una partita va da ${MATCH_MINUTES_MIN} a ${MATCH_MINUTES_MAX} minuti`,
+    );
+  const kept: DaySlot[] = [];
+  for (const day of [...days].sort((a, b) => a.date.localeCompare(b.date))) {
+    const count = slotCount(day, matchMinutes);
+    let index = 0;
+    while (index < count && slotTime(day, index, matchMinutes) <= after) index++;
+    if (index >= count) continue;
+    kept.push(
+      index === 0
+        ? day
+        : { ...day, startTime: slotStart(day, index, matchMinutes) },
+    );
+  }
+  return kept;
+}
+
+/**
+ * Due orari naive sono attaccati se stessa giornata e distanti esattamente uno
+ * slot: serve a chi riempie un calendario già iniziato per sapere se il primo
+ * slot libero segue davvero l'ultima partita già in programma.
+ */
+export function isAdjacentSlot(
+  earlier: string,
+  later: string,
+  matchMinutes: number,
+): boolean {
+  const [earlierDate, earlierTime] = earlier.split("T");
+  const [laterDate, laterTime] = later.split("T");
+  if (earlierDate !== laterDate) return false;
+  return toMinutes(laterTime) - toMinutes(earlierTime) === matchMinutes;
 }
 
 /** Due slot sono attaccati solo se stessa giornata e orari consecutivi. */
@@ -133,6 +190,10 @@ function slotsNeeded(
  * riordina la coda del blocco (riposo gratis), e solo se il back-to-back
  * resta si salta uno slot, a patto che ne avanzino abbastanza per tutte le
  * partite rimaste. Il riposo non deve mai costare partite non collocate.
+ *
+ * `busyBefore` sono le squadre già in campo nello slot che precede il primo
+ * disponibile (partite fuori da questa passata, in un calendario riempito in
+ * corsa): il vincolo di riposo vale anche lì.
  */
 function placeBlocks(
   slots: Slot[],
@@ -141,11 +202,22 @@ function placeBlocks(
   blocks: ScheduleBlock[],
   teamsByMatch: TeamsByMatch,
   withRest: boolean,
+  busyBefore: Set<number> | undefined,
 ): { assignments: Assignment[]; unplacedMatchIds: number[] } {
   const assignments: Assignment[] = [];
   const unplacedMatchIds: number[] = [];
   const teamsBySlot = new Map<number, Set<number>>();
   let slotCursor = 0;
+
+  // Squadre in campo nello slot immediatamente precedente, se attaccato.
+  // Prima dello slot 0 c'è solo quanto passato dal chiamante; dopo un
+  // cuscinetto lo slot precedente è vuoto e non vincola nulla.
+  const busyAt = (cursor: number): Set<number> | undefined =>
+    cursor === 0
+      ? busyBefore
+      : isBackToBack(slots[cursor - 1], slots[cursor])
+        ? teamsBySlot.get(cursor - 1)
+        : undefined;
 
   for (let b = 0; b < blocks.length; b++) {
     const queue = [...blocks[b].matchIds];
@@ -154,10 +226,7 @@ function placeBlocks(
         unplacedMatchIds.push(...queue);
         break;
       }
-      const busy =
-        withRest && slotCursor > 0 && isBackToBack(slots[slotCursor - 1], slots[slotCursor])
-          ? teamsBySlot.get(slotCursor - 1)
-          : undefined;
+      const busy = withRest ? busyAt(slotCursor) : undefined;
       if (busy && busy.size > 0) {
         restedFirst(queue, busy, teamsByMatch);
         const stillBackToBack = queue
@@ -209,6 +278,10 @@ function placeBlocks(
  * `teamsByMatch` serve a dare riposo tra due slot attaccati. Doppia passata
  * come rete di sicurezza: se la passata con riposo lascia fuori più partite
  * di quella senza, vince quella senza. Il riposo non costa mai una partita.
+ *
+ * `busyBefore` estende il riposo oltre il bordo di questa generazione: sono le
+ * squadre impegnate nello slot che precede il primo disponibile, e il
+ * chiamante lo passa solo se i due slot sono davvero attaccati.
  */
 export function buildSchedule(
   days: DaySlot[],
@@ -216,6 +289,7 @@ export function buildSchedule(
   matchMinutes: number,
   blocks: ScheduleBlock[],
   teamsByMatch: TeamsByMatch,
+  busyBefore?: Set<number>,
 ): ScheduleResult {
   if (days.length === 0) throw new Error("Definisci almeno una giornata");
   if (courts.length === 0) throw new Error("Definisci almeno un campo");
@@ -228,8 +302,7 @@ export function buildSchedule(
   const slots: Slot[] = [];
   const slotsPerDay: Array<{ date: string; slots: number }> = [];
   for (const day of orderedDays) {
-    const span = toMinutes(day.endTime) - toMinutes(day.startTime);
-    const count = Math.max(0, Math.floor(span / matchMinutes));
+    const count = slotCount(day, matchMinutes);
     slotsPerDay.push({ date: day.date, slots: count });
     for (let i = 0; i < count; i++) slots.push({ day, index: i });
   }
@@ -241,6 +314,7 @@ export function buildSchedule(
     blocks,
     teamsByMatch,
     true,
+    busyBefore,
   );
   if (withRest.unplacedMatchIds.length === 0) return { ...withRest, slotsPerDay };
 
@@ -251,6 +325,7 @@ export function buildSchedule(
     blocks,
     teamsByMatch,
     false,
+    undefined,
   );
   const best =
     withoutRest.unplacedMatchIds.length < withRest.unplacedMatchIds.length

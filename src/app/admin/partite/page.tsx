@@ -17,6 +17,7 @@ import {
 } from "@/lib/view";
 import {
   clearScoreAction,
+  fillScheduleGapsAction,
   forfeitAction,
   generateScheduleAction,
   saveScoreAction,
@@ -195,14 +196,28 @@ export default async function AdminMatchesPage({
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="text-2xl font-bold">Partite</h1>
         {canSchedule && canManage && (
-          <form action={generateScheduleAction} className="ml-auto">
-            <input type="hidden" name="tournamentId" value={tournament.id} />
-            <button className={btnSecondary}>
-              🗓 Genera calendario (orari stimati)
-            </button>
-          </form>
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            <form action={fillScheduleGapsAction}>
+              <input type="hidden" name="tournamentId" value={tournament.id} />
+              <button className={btnSecondary}>➕ Completa calendario</button>
+            </form>
+            <form action={generateScheduleAction}>
+              <input type="hidden" name="tournamentId" value={tournament.id} />
+              <button className={btnSecondary}>
+                🗓 Genera calendario (orari stimati)
+              </button>
+            </form>
+          </div>
         )}
       </div>
+      {canSchedule && canManage && (
+        <p className="text-sm text-stone-500">
+          <em>Completa calendario</em> dà un orario solo alle partite che non ce
+          l&apos;hanno, dopo l&apos;ultima già in programma: si usa a torneo
+          iniziato. <em>Genera calendario</em> rifà tutto da capo: da usare a
+          torneo non iniziato.
+        </p>
+      )}
       {hasMatches && !canSchedule && canManage && (
         <p className="text-sm text-stone-500">
           Per generare il calendario definisci giornate e campi in{" "}

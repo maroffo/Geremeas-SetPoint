@@ -10,7 +10,16 @@ import { roundRobin } from "./roundRobin";
 import { validateMatchScore } from "./score";
 import { computeStandings, type StandingRow } from "./standings";
 import { generateBalancedTeams } from "./teamGenerator";
-import { buildSchedule, isValidMatchMinutes } from "./scheduler";
+import {
+  buildSchedule,
+  daysAfter,
+  isAdjacentSlot,
+  isValidMatchMinutes,
+  type DaySlot,
+  type ScheduleBlock,
+  type TeamsByMatch,
+} from "./scheduler";
+import { nowInRome } from "./clock";
 import { agePhrase, validatePhone } from "./validation";
 import type {
   Gender,
@@ -397,6 +406,48 @@ export function deleteCourt(courtId: number): void {
 // ---------------------------------------------------------------------------
 
 /**
+ * Blocchi e membership per lo scheduler, dalle partite da programmare: i round
+ * dei gironi in ordine, poi quelli del tabellone. Dentro un round le squadre
+ * sono tutte diverse, quindi il blocco è giocabile in parallelo.
+ *
+ * I round di tabellone non ancora propagati hanno le squadre a NULL: restano
+ * senza membership e quindi senza vincolo di riposo (non c'è nessuno da far
+ * riposare).
+ */
+function scheduleInput(pending: MatchRow[]): {
+  blocks: ScheduleBlock[];
+  teamsByMatch: TeamsByMatch;
+} {
+  const groupRounds = new Map<number, number[]>();
+  const knockoutRounds = new Map<number, number[]>();
+  const teamsByMatch: TeamsByMatch = new Map();
+  for (const m of pending) {
+    const target = m.phase === "group" ? groupRounds : knockoutRounds;
+    const list = target.get(m.round) ?? [];
+    list.push(m.id);
+    target.set(m.round, list);
+    const teams = [m.team_a, m.team_b].filter((id): id is number => id !== null);
+    if (teams.length > 0) teamsByMatch.set(m.id, teams);
+  }
+  const byRound = (map: Map<number, number[]>) =>
+    [...map.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([, ids]) => ({ matchIds: ids }));
+  return {
+    blocks: [...byRound(groupRounds), ...byRound(knockoutRounds)],
+    teamsByMatch,
+  };
+}
+
+function daySlots(tournamentId: number): DaySlot[] {
+  return listDays(tournamentId).map((d) => ({
+    date: d.date,
+    startTime: d.start_time,
+    endTime: d.end_time,
+  }));
+}
+
+/**
  * Distribuisce le partite non ancora giocate su giornate e campi con orari
  * stimati. I blocchi (round dei gironi in ordine, poi round del tabellone)
  * non condividono mai uno slot, così una squadra non gioca due volte nello
@@ -410,40 +461,14 @@ export function generateSchedule(tournamentId: number): {
 } {
   const t = getTournament(tournamentId);
   if (!t) throw new Error("Torneo non trovato");
-  const days = listDays(tournamentId);
   const courts = listCourts(tournamentId);
   const pending = listMatches(tournamentId).filter(
     (m) => m.status === "scheduled",
   );
-
-  const groupRounds = new Map<number, number[]>();
-  const knockoutRounds = new Map<number, number[]>();
-  for (const m of pending) {
-    const target = m.phase === "group" ? groupRounds : knockoutRounds;
-    const list = target.get(m.round) ?? [];
-    list.push(m.id);
-    target.set(m.round, list);
-  }
-  const byRound = (map: Map<number, number[]>) =>
-    [...map.entries()].sort((a, b) => a[0] - b[0]).map(([, ids]) => ({
-      matchIds: ids,
-    }));
-  const blocks = [...byRound(groupRounds), ...byRound(knockoutRounds)];
-
-  // Membership per il riposo: i round di tabellone non ancora propagati hanno
-  // le squadre a NULL, quindi restano senza vincolo (nessuno da far riposare).
-  const teamsByMatch = new Map<number, number[]>();
-  for (const m of pending) {
-    const teams = [m.team_a, m.team_b].filter((id): id is number => id !== null);
-    if (teams.length > 0) teamsByMatch.set(m.id, teams);
-  }
+  const { blocks, teamsByMatch } = scheduleInput(pending);
 
   const result = buildSchedule(
-    days.map((d) => ({
-      date: d.date,
-      startTime: d.start_time,
-      endTime: d.end_time,
-    })),
+    daySlots(tournamentId),
     courts.map((c) => c.name),
     t.match_minutes,
     blocks,
@@ -458,6 +483,82 @@ export function generateSchedule(tournamentId: number): {
   );
   const tx = db.transaction(() => {
     for (const m of pending) clear.run(m.id);
+    for (const a of result.assignments)
+      update.run(a.court, a.scheduledAt, a.matchId);
+  });
+  tx();
+
+  return {
+    placed: result.assignments.length,
+    unplaced: result.unplacedMatchIds.length,
+  };
+}
+
+/**
+ * Completa il calendario a torneo iniziato: programma SOLO le partite ancora
+ * senza orario e non tocca nulla di ciò che è già in calendario (niente clear).
+ *
+ * Gli slot utilizzabili sono quelli strettamente successivi sia all'ultima
+ * partita già in programma sia ad adesso: da lì discende che non può nascere
+ * una collisione campo+orario con l'esistente e che nessuna partita finisce nel
+ * passato. Tutti i confronti sono lessicali su stringhe naive di Roma
+ * ("YYYY-MM-DDTHH:MM"), mai `new Date()` su una di esse.
+ *
+ * `at` è iniettabile per i test; in produzione è l'istante corrente.
+ */
+export function fillScheduleGaps(
+  tournamentId: number,
+  at: Date = new Date(),
+): { placed: number; unplaced: number } {
+  const t = getTournament(tournamentId);
+  if (!t) throw new Error("Torneo non trovato");
+  const days = daySlots(tournamentId);
+  if (days.length === 0) throw new Error("Definisci almeno una giornata");
+  const courts = listCourts(tournamentId);
+  if (courts.length === 0) throw new Error("Definisci almeno un campo");
+
+  const matches = listMatches(tournamentId);
+  const pending = matches.filter(
+    (m) => m.status === "scheduled" && m.scheduled_at === null,
+  );
+  if (pending.length === 0) return { placed: 0, unplaced: 0 };
+
+  let lastOccupied = "";
+  for (const m of matches)
+    if (m.scheduled_at !== null && m.scheduled_at > lastOccupied)
+      lastOccupied = m.scheduled_at;
+  const now = nowInRome(at);
+  const after = lastOccupied > now ? lastOccupied : now;
+
+  const available = daysAfter(days, t.match_minutes, after);
+  // Nessuno slot residuo: le partite restano senza orario, contate onestamente
+  // come unplaced invece di essere forzate su orari già occupati o passati.
+  if (available.length === 0) return { placed: 0, unplaced: pending.length };
+
+  // Il riposo vale anche rispetto all'ultimo slot già giocato/programmato,
+  // ma solo se il primo slot libero gli è davvero attaccato.
+  const firstFree = `${available[0].date}T${available[0].startTime}`;
+  const busyBefore = new Set<number>();
+  if (lastOccupied && isAdjacentSlot(lastOccupied, firstFree, t.match_minutes))
+    for (const m of matches)
+      if (m.scheduled_at === lastOccupied)
+        for (const teamId of [m.team_a, m.team_b])
+          if (teamId !== null) busyBefore.add(teamId);
+
+  const { blocks, teamsByMatch } = scheduleInput(pending);
+  const result = buildSchedule(
+    available,
+    courts.map((c) => c.name),
+    t.match_minutes,
+    blocks,
+    teamsByMatch,
+    busyBefore,
+  );
+
+  const update = db.prepare(
+    "UPDATE matches SET court = ?, scheduled_at = ? WHERE id = ?",
+  );
+  const tx = db.transaction(() => {
     for (const a of result.assignments)
       update.run(a.court, a.scheduledAt, a.matchId);
   });
