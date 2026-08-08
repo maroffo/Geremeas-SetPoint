@@ -88,7 +88,7 @@ Append-only after this point. The implementing session does NOT relitigate; exec
 - [x] W8.1 Dipendenza dev @playwright/test + chromium; spec unico: iscrivi 4 squadre (con dichiarazione età se richiesta) → admin conferma → genera gironi → genera calendario → inserisci tutti i punteggi → genera tabellone → punteggi → verifica podio in home. Server standalone su porta dedicata con DB temporaneo (pattern di scripts/e2e-smoke.sh). Target `make test-e2e-full`; NON entra in `check`.
 
 ### W9 - docs + follow-ups
-- [ ] W9.1 deploy/README.md aggiornato (SCOREKEEPER_PIN, uptime check, riempi-buchi vs genera); README utente (pagina squadra, storico); tech-debt.md: rimossa la riga rigenerazione (chiusa da W5), aggiunta eventuale coda.
+- [x] W9.1 deploy/README.md aggiornato (SCOREKEEPER_PIN, uptime check, riempi-buchi vs genera); README utente (pagina squadra, storico); tech-debt.md: rimossa la riga rigenerazione (chiusa da W5), aggiunta eventuale coda.
 - [ ] W9.2 Follow-up DRAFTED qui (filed a PR time): (a) refactor per-campo di buildSchedule per collision-avoidance nel full-regenerate — what: modello slot per (giorno,orario,campo) con occupazione; where: src/lib/scheduler.ts + repo.generateSchedule; done-when: full-regenerate a torneo in corso non colloca mai su (campo,orario) di partite giocate, test dedicato; verify: unit + integrazione; label proposta agent:ready. (b) QR/short-link pagina squadra — what: rotta breve + QR generato in admin; done-when: QR scaricabile per squadra; label agent:needs-spec (grafica da decidere).
 
 ## E2E matrix
@@ -143,7 +143,8 @@ La matrice è l'unione di: (superfici nuove del run) × (happy path + il loro ed
 - [ ] W6.2 deploy D
 - [ ] W7 operatività
 - [x] W8.1 Playwright full-flow (2026-08-08: `make test-e2e-full` verde da build pulita in 7,6s, `npm test` 166/166, `npx next typegen && npx tsc --noEmit` pulito, `make test-e2e` smoke verde)
-- [ ] W9 docs + follow-ups
+- [x] W9.1 docs (2026-08-08: deploy/README.md, README.md, tech-debt.md; `make check` verde dopo `npx next typegen`, 166/166 test)
+- [ ] W9.2 follow-up filed a PR time
 - [ ] Review round + fixes
 - [ ] PR + SCORE
 - [ ] Close-out (plan → completed/, retrospettiva)
@@ -357,6 +358,22 @@ knockout 19:20 Campo 1 | knockout 19:20 Campo 2     (semifinali, +1 slot di ripo
 knockout 10/08 18:00   | knockout 10/08 18:00       (finale e finalina)
 ```
 
+### W9.1 docs (2026-08-08)
+
+Il registro di tech debt aveva **due** righe chiuse dal night-run, non una: oltre
+alla rigenerazione del calendario (W5.2) c'era ancora "cookie admin derivato dal
+PIN, sostituire con sessioni server-side", che è letteralmente ciò che W4.1 ha
+fatto. Una riga chiusa che sopravvive è peggio di nessuna riga: alla prossima
+lettura sembra lavoro ancora da fare e costa una verifica per scoprire che non
+lo è. Cancellate entrambe (decisione 58).
+
+Anche la riga sul lockout andava riscritta, non cancellata: il lockout ora
+esiste, ma vive in memoria, quindi il debito è cambiato di natura (da "non c'è"
+a "non sopravvive a un riavvio"), non è sparito. Stessa cosa in
+`deploy/README.md`, dove la frase del bootstrap "l'entropia è ciò che rende
+accettabile l'assenza di lockout" era diventata falsa dentro un commento a un
+comando che si copia-incolla.
+
 ## Decisions
 (append-only; execution-time decisions land here)
 
@@ -406,6 +423,9 @@ knockout 10/08 18:00   | knockout 10/08 18:00       (finale e finalina)
 | 54 | (W8.1) Come si aspetta una server action | ogni click chiude con l'asserzione sullo stato atteso (conteggi di "annulla risultato", di righe giornata, di badge) invece di `waitForLoadState`/`networkidle` | l'`expect` con retry è insieme sincronizzazione e verifica: senza, il fill successivo finisce sul DOM uscente (bug osservato: una sola giornata aggiunta su due) | Next espone un segnale esplicito di fine azione |
 | 55 | (W8.1) Database del server sotto test | ricreato vuoto all'**avvio** dello script (`rm -rf` + `mkdir`), non ripulito alla fine | il cleanup a fine run non scatta se Playwright uccide il webServer o se la run viene interrotta: pulire in ingresso garantisce lo stato iniziale "nessun torneo" che è la prima asserzione dello spec | si vogliono run parallele sulla stessa macchina (servirebbe una dir per run) |
 | 56 | (W8.1) `e2e/**` escluso da vitest | `exclude: [...configDefaults.exclude, "e2e/**"]` in vitest.config.mts | il default include di vitest raccoglie `**/*.spec.ts`: senza l'esclusione `npm test` proverebbe a eseguire lo spec Playwright fuori dal suo runner | gli spec e2e cambiano suffisso |
+| 57 | (W9.1) `SCOREKEEPER_PIN` nel comando di deploy documentato benché opzionale | il `--set-secrets` di riferimento include entrambi i secret, con accanto la frase esplicita che togliendolo l'app torna al solo admin | il comando del README è quello che si copia-incolla sotto pressione: documentare la variante minima e lasciare l'aggiunta all'iniziativa produce deploy senza segnapunti proprio nei giorni in cui serve | il ruolo segnapunti smette di essere la configurazione attesa |
+| 58 | (W9.1) Righe di tech-debt chiuse: cancellate, non spuntate | tolte le righe "cookie admin derivato dal PIN" (chiusa da W4.1) e "rigenerazione del calendario a torneo in corso" (chiusa da W5.2); la seconda è sostituita da una riga sul residuo (il full regenerate resta cieco all'occupazione per campo, follow-up W9.2a) | è la regola scritta nell'ABOUTME del file; una riga chiusa che resta è un falso positivo permanente, ma cancellare senza registrare il residuo perderebbe l'unica parte ancora vera | il registro acquisisce uno storico dei chiusi |
+| 59 | (W9.1) Dove si documenta il re-login obbligatorio | in `deploy/README.md`, sotto il comando di deploy, non tra i rischi accettati | non è un rischio da accettare ma un passo della procedura: chi deploya deve leggerlo prima di lanciare, e la verifica post-rollout (entrambi i PIN) sta lì accanto | il ponte dai vecchi cookie viene reintrodotto |
 
 ## Outcomes & Retrospective
 (fill at close)
