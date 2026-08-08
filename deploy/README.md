@@ -151,16 +151,22 @@ vengono collocate comunque, riposo o no.
 
 ## Monitoraggio
 
-Uptime check Cloud Monitoring previsto su `https://setpoint.wishew.com/`
+Uptime check Cloud Monitoring attivo su `https://setpoint.wishew.com/`
 (HTTPS, GET su `/`, atteso 200, ogni 5 minuti da più regioni) con notification
 channel email verso `massimiliano.aroffo@hikmaai.io` e alert policy che scatta
-dopo due controlli falliti consecutivi. Serve a coprire i giorni di gara: con
+quando il check fallisce. Serve a coprire i giorni di gara: con
 `--max-instances 1` un crash dell'istanza non ha un'altra istanza che assorbe
 il traffico, quindi la segnalazione via mail è l'unico avviso.
 
-La creazione effettiva del check è un'attività a parte (W7.2 del piano
-`quality_reports/plans/active/2026-08-07_nightrun-miglioramenti.md`); una volta
-creato, la verifica è:
+Risorse create (progetto `playground-maroffo`):
+
+| Risorsa | Nome |
+|---|---|
+| Uptime check | `geremeas-setpoint-home` |
+| Notification channel | `Geremeas SetPoint alert (Max)` (email) |
+| Alert policy | `Geremeas SetPoint uptime down` |
+
+Verifica che il check esista:
 
 ```bash
 gcloud monitoring uptime list-configs --project playground-maroffo \
