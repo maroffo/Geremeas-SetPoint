@@ -109,6 +109,18 @@ CREATE TABLE IF NOT EXISTS tournament_posters (
   mime TEXT NOT NULL
 );
 
+-- Sessioni di amministrazione: il cookie porta il token in chiaro, qui resta
+-- solo il suo sha256, così un dump del DB non permette di autenticarsi.
+-- created_at/expires_at sono epoch millis (istanti assoluti, non orari di
+-- parete): niente confronti su stringhe naive.
+CREATE TABLE IF NOT EXISTS sessions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  token_hash TEXT NOT NULL UNIQUE,
+  role TEXT NOT NULL CHECK (role IN ('admin','scorekeeper')),
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_teams_tournament ON teams(tournament_id);
 CREATE INDEX IF NOT EXISTS idx_players_tournament ON players(tournament_id);
 CREATE INDEX IF NOT EXISTS idx_players_team ON players(team_id);

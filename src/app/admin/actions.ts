@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { loginAdmin, logoutAdmin, requireAdmin } from "@/lib/auth";
+import { loginAdmin, logoutAdmin, requireAdmin, requireScorer } from "@/lib/auth";
 import * as repo from "@/lib/repo";
 import type { SetInput, TournamentFormat, TournamentStatus } from "@/lib/types";
 
@@ -24,8 +24,9 @@ function done(back: string, error: string | null): never {
 
 export async function loginAction(formData: FormData): Promise<void> {
   const pin = String(formData.get("pin") ?? "");
-  const ok = await loginAdmin(pin);
-  redirect(ok ? "/admin" : "/admin/login?error=PIN%20errato");
+  const role = await loginAdmin(pin);
+  if (!role) redirect("/admin/login?error=PIN%20errato");
+  redirect(role === "admin" ? "/admin" : "/admin/partite");
 }
 
 export async function logoutAction(): Promise<void> {
@@ -315,7 +316,7 @@ export async function generateGroupsAction(formData: FormData): Promise<void> {
 }
 
 export async function saveScoreAction(formData: FormData): Promise<void> {
-  await requireAdmin();
+  await requireScorer();
   const matchId = Number(formData.get("matchId"));
   const sets: SetInput[] = [];
   for (let i = 1; i <= 3; i++) {
@@ -333,7 +334,7 @@ export async function saveScoreAction(formData: FormData): Promise<void> {
 }
 
 export async function forfeitAction(formData: FormData): Promise<void> {
-  await requireAdmin();
+  await requireScorer();
   const matchId = Number(formData.get("matchId"));
   const teamId = Number(formData.get("teamId"));
   let error: string | null = null;
@@ -346,7 +347,7 @@ export async function forfeitAction(formData: FormData): Promise<void> {
 }
 
 export async function clearScoreAction(formData: FormData): Promise<void> {
-  await requireAdmin();
+  await requireScorer();
   const matchId = Number(formData.get("matchId"));
   let error: string | null = null;
   try {

@@ -66,8 +66,8 @@ Append-only after this point. The implementing session does NOT relitigate; exec
 - [x] W3.2 generateSchedule passa la membership (team_a/team_b delle pending).
 
 ### W4 - sessioni + ruoli (deploy C subito verificato)
-- [ ] W4.1 Tabella `sessions` (id, token_hash UNIQUE, role, created_at, expires_at) in db.ts (CREATE IF NOT EXISTS, niente ALTER); auth.ts riscritto: createSession/validateSession/revokeSession, cookie col token raw, DB con sha256; loginAdmin accetta ADMIN_PIN→admin, SCOREKEEPER_PIN→scorekeeper (secret opzionale: assente = ruolo disattivo); lockout in-memory (Map ip→{fails,until}) 5 tentativi → 15 min; cleanup lazy delle scadute al login. Test: login/logout/revoca, ruolo, lockout, scadenza.
-- [ ] W4.2 requireAdmin() invariato per le 20 action di gestione; nuovo requireScorer() (admin O scorekeeper) per saveScore/forfeit/clearScore E per la view partite; layout admin role-aware (nav ridotta per scorekeeper: solo Partite); admin/partite nasconde a scorekeeper i form scheduleMatch e il bottone genera. Test: scorekeeper può salvare un punteggio, NON può creare tornei (assert error).
+- [x] W4.1 Tabella `sessions` (id, token_hash UNIQUE, role, created_at, expires_at) in db.ts (CREATE IF NOT EXISTS, niente ALTER); auth.ts riscritto: createSession/validateSession/revokeSession, cookie col token raw, DB con sha256; loginAdmin accetta ADMIN_PIN→admin, SCOREKEEPER_PIN→scorekeeper (secret opzionale: assente = ruolo disattivo); lockout in-memory (Map ip→{fails,until}) 5 tentativi → 15 min; cleanup lazy delle scadute al login. Test: login/logout/revoca, ruolo, lockout, scadenza.
+- [x] W4.2 requireAdmin() invariato per le 20 action di gestione; nuovo requireScorer() (admin O scorekeeper) per saveScore/forfeit/clearScore E per la view partite; layout admin role-aware (nav ridotta per scorekeeper: solo Partite); admin/partite nasconde a scorekeeper i form scheduleMatch e il bottone genera. Test: scorekeeper può salvare un punteggio, NON può creare tornei (assert error).
 - [ ] W4.3 Secret GCP `geremeas-scorekeeper-pin` (openssl rand -hex 4) + `--set-secrets SCOREKEEPER_PIN=...` nel comando deploy documentato.
 - [ ] W4.4 Deploy C, re-login verificato in prod con entrambi i PIN, PIN segnapunti riportato a Max.
 
@@ -135,7 +135,8 @@ La matrice è l'unione di: (superfici nuove del run) × (happy path + il loro ed
 - [x] W2.1-W2.3 quick win pubblici (2026-08-07: `npm test` 113/113, `tsc --noEmit` pulito, probe HTTP sul server standalone verde)
 - [ ] W2.4 deploy A
 - [x] W3.1-W3.2 riposo scheduler (2026-08-08: `npm test` 119/119, `tsc --noEmit` pulito, `make test-e2e` verde)
-- [ ] W4 sessioni+ruoli + deploy C
+- [x] W4.1-W4.2 sessioni + ruoli (2026-08-08: `npm test` 136/136, `tsc --noEmit` pulito, `make test-e2e` verde con le nuove probe di sessione)
+- [ ] W4.3-W4.4 secret SCOREKEEPER_PIN + deploy C
 - [ ] W5 riempi-buchi/timezone + deploy B
 - [ ] W6 archivio + deploy D
 - [ ] W7 operatività
@@ -212,6 +213,20 @@ AssertionError: expected Set{ '2026-08-10', '2026-08-11' } to deeply equal Set{ 
 
 Sorpresa utile per il tabellone: al momento di `generateSchedule` i round di tabellone oltre il primo hanno `team_a/team_b` a NULL (non ancora propagati), quindi restano senza membership e senza vincolo di riposo. Nessun cuscinetto sprecato lì, e il test del tabellone (finale dopo le semifinali) resta invariato.
 
+### W4 sessioni + ruoli (2026-08-08)
+
+Lo smoke e2e **non faceva login**, contrariamente a quanto dava per scontato il brief: verificava home 200, login 200 e il 307 di `/admin`, mai una sessione autenticata. E non poteva farlo: `loginAction` è una server action, richiamabile solo con l'header `Next-Action: <id generato a build time>`, che non si estrae in modo stabile da uno script curl. La verifica end-to-end delle sessioni è quindi fatta scrivendo la riga in `sessions` direttamente sul DB temporaneo del server sotto test (stesso file, WAL) e presentando il token nel cookie. Copre esattamente la parte nuova: il server vero rilegge la tabella, ricalcola lo sha256 e decide.
+
+```
+E2E OK: home 200, login 200, sessioni admin/segnapunti riconosciute, revoca e token ignoti al login
+```
+
+Le probe aggiunte: token inventato → 307 login; sessione admin → 200 su `/admin`; sessione segnapunti → 200 su `/admin/partite` ma 307 verso `/admin/partite` su `/admin`; riga cancellata (quello che fa il logout) → 307 login.
+
+Il progetto **non aveva un `vitest.config`**: senza alias `@/` nessun test poteva importare un modulo sotto `src/app`, quindi le server action non erano testabili affatto (finora i test stanno tutti in `src/lib`). Aggiunto `vitest.config.mts` con il solo alias (estensione `.mts` e non `.ts`: con `package.json` senza `"type": "module"` Vite avvisa a ogni run che sta caricando ESM come CommonJS, e l'output di `npm test` deve restare pulito). Da lì `src/app/admin/__tests__/actions.test.ts` esegue le action vere contro un DB temporaneo, con `redirect()` mockato in modo che **lanci**: col mock precedente (una `vi.fn` muta) la guardia avrebbe ridiretto e l'azione sarebbe proseguita lo stesso, cioè il test avrebbe mostrato verde su un'autorizzazione bypassata.
+
+Limite noto e accettato del lockout: vive in memoria, quindi un riavvio dell'istanza Cloud Run azzera i contatori. Con `--max-instances 1` è corretto rispetto alla concorrenza, non alla persistenza; il lockout persistente su DB era già fuori scope (riga "Out of scope stanotte").
+
 ## Decisions
 (append-only; execution-time decisions land here)
 
@@ -233,6 +248,15 @@ Sorpresa utile per il tabellone: al momento di `generateSchedule` i round di tab
 | 26 | (W3.1) Cosa conta come "slot immediatamente precedente" | solo stessa giornata e indice contiguo (`isBackToBack`); il cambio di giornata azzera il vincolo | tra l'ultimo slot di una sera e il primo della mattina dopo il riposo c'è già; senza questo controllo si sprecherebbe un cuscinetto a ogni confine di giornata, allungando il calendario per nulla | si introducono giornate con più fasce orarie separate nello stesso giorno |
 | 27 | (W3.1) Esito della doppia passata | se pass-1 lascia partite fuori si tiene la passata con MENO unplaced (a parità vince pass-1, che ha il riposo), invece di adottare pass-2 a scatola chiusa | pass-2 non è mai peggiore per costruzione, ma prendere il minimo rende la rete di sicurezza vera in ogni caso, anche se una modifica futura rompesse quella costruzione | pass-2 diventa la passata di riferimento per altri motivi |
 | 28 | (W3.1) Cosa fa il riordino quando il batch resta misto | il batch continua a riempire tutti i campi (le partite in conflitto restano in coda ma non si lascia un campo vuoto); il cuscinetto scatta se dopo il riordino il batch contiene ancora un back-to-back | lasciare campi vuoti per il riposo è l'unico modo di perdere capienza davvero; il cuscinetto è reversibile dal lookahead, un campo vuoto no | si passa a un modello per-campo (follow-up W9.2a) |
+| 29 | (W4.1) Nome del cookie | nuovo `gsp_session` (il vecchio `gsp_admin` non descrive più il contenuto, ora c'è anche il segnapunti); `gsp_admin` viene **cancellato** a login e logout | il vecchio valore è sha256 del PIN, cioè un derivato del segreto: lasciarlo nei browser non serve a niente e resta una credenziale morta in giro | si aggiunge un terzo ruolo e il nome del cookie deve dirlo |
+| 30 | (W4.1) Tipo di `created_at`/`expires_at` | INTEGER epoch millis, non il `TEXT datetime('now')` delle altre tabelle | sono istanti assoluti confrontati con `Date.now()`: le stringhe naive del resto del DB sono orari di parete di Europe/Rome e confonderli è esattamente il bug del hard requirement 5 | le sessioni devono essere lette da SQL umano più spesso di quanto vengano confrontate |
+| 31 | (W4.1) Fail-closed su ADMIN_PIN mancante in produzione | conservato invariato: `roleForPin` propaga l'errore, quindi in quello stato **nemmeno il segnapunti** entra | il PIN admin è un secret obbligatorio del deploy; degradare a "solo segnapunti" trasformerebbe un errore di configurazione in un servizio a metà, silenzioso | SCOREKEEPER_PIN diventa il segreto principale di un deploy senza admin |
+| 32 | (W4.1) Finestra di conteggio dei fallimenti | coincide con quella di blocco (15 min) e i tentativi fatti **durante** il blocco non lo prolungano né vengono contati | un blocco che si autoalimenta ad ogni tentativo diventa permanente e chiude fuori l'organizzatore proprio nei giorni di gara, che è il fallimento più costoso qui | si vuole penalizzare il brute force insistente più della disponibilità |
+| 33 | (W4.1) IP quando manca `x-forwarded-for` | chiave `"sconosciuto"` condivisa | in locale/dev non c'è proxy: un contatore condiviso è più sicuro che nessun contatore, e in Cloud Run l'header c'è sempre | il servizio finisce dietro un proxy che usa un header diverso |
+| 34 | (W4.2) Dove finisce un segnapunti su una pagina di gestione | `requireAdmin` manda un ruolo **autenticato** a `/admin/partite` e un anonimo a `/admin/login` | mandare al login chi è già loggato mostra un form che non serve (e da cui rientrerebbe di nuovo come segnapunti): il redirect all'unica pagina che gli compete è l'unico esito utile | compare una pagina admin in sola lettura sensata per il segnapunti |
+| 35 | (W4.2) Firma di `requireScorer` | restituisce il `Role`, non `void` come `requireAdmin` | la pagina partite deve sapere se nascondere i comandi di gestione: senza il valore di ritorno servirebbe una seconda lettura del cookie e una seconda query sulla sessione per ogni render | il ruolo serve a così tante pagine da giustificare un contesto condiviso |
+| 36 | (W4.1) `verifyPin` rimosso | sostituito da `roleForPin(pin): Role \| null` (nessun chiamante fuori dai test) | con due PIN un booleano non basta e tenerne due (verifyPin + roleForPin) inviterebbe a controllare quello sbagliato | torna un solo PIN |
+| 37 | (W4.2) Come si testano le action | `vitest.config.mts` con alias `@` + `redirect()` mockato che **lancia**, action eseguite davvero su DB temporaneo | è l'unico modo di provare che il segnapunti non crea tornei: un mock di `redirect` che non interrompe farebbe passare il test anche con la guardia bypassata | Next espone un modo supportato di invocare le action fuori dal server |
 
 ## Outcomes & Retrospective
 (fill at close)
