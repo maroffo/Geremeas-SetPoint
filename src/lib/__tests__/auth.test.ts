@@ -289,6 +289,22 @@ describe("lockout dei tentativi falliti", () => {
     expect(await login(ADMIN_PIN)).toBe("admin");
   });
 
+  it("dietro il proxy il lockout segue l'ultimo segmento di x-forwarded-for, non il primo", async () => {
+    // Cloud Run appende l'IP reale in coda: il blocco deve seguire quello. Il
+    // client controlla i segmenti di testa ma non l'ultimo.
+    fakeHeaders.ip = "1.1.1.1, 203.0.113.7";
+    for (let i = 0; i < 5; i++) expect(await login("sbagliato")).toBeNull();
+
+    // Stesso IP reale (ultimo segmento), prefisso client diverso: resta bloccato.
+    fakeHeaders.ip = "9.9.9.9, 203.0.113.7";
+    expect(await login(ADMIN_PIN)).toBeNull();
+
+    // IP reale diverso (ultimo segmento) anche col primo segmento identico al
+    // blocco: passa. Se il codice leggesse il primo segmento sarebbe bloccato.
+    fakeHeaders.ip = "1.1.1.1, 198.51.100.4";
+    expect(await login(ADMIN_PIN)).toBe("admin");
+  });
+
   it("un login riuscito azzera il contatore", async () => {
     for (let i = 0; i < 4; i++) await login("sbagliato");
     expect(await login(ADMIN_PIN)).toBe("admin");

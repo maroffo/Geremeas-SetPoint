@@ -114,10 +114,19 @@ export function purgeExpiredSessions(now: number = Date.now()): number {
 // quindi il contatore è quello vero. Con più istanze andrebbe spostato sul DB.
 const loginAttempts = new Map<string, { fails: number; until: number }>();
 
-/** IP del client dietro il proxy di Cloud Run (primo valore di x-forwarded-for). */
+/**
+ * IP del client per il lockout. Dietro Cloud Run il proxy di Google APPENDE
+ * l'IP reale in coda a x-forwarded-for: i segmenti che lo precedono sono
+ * scritti dal client e quindi falsificabili. Si prende perciò l'ULTIMO
+ * segmento (quello messo dall'infrastruttura), non il primo, altrimenti un
+ * client potrebbe aggirare il lockout ruotando l'header o bloccare l'admin
+ * iniettando l'IP altrui. Header assente: fallback a "sconosciuto".
+ */
 async function clientIp(): Promise<string> {
   const forwarded = (await headers()).get("x-forwarded-for");
-  return forwarded?.split(",")[0]?.trim() || "sconosciuto";
+  if (!forwarded) return "sconosciuto";
+  const segments = forwarded.split(",");
+  return segments[segments.length - 1]?.trim() || "sconosciuto";
 }
 
 function forgetOldAttempts(now: number): void {

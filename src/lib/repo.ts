@@ -20,6 +20,7 @@ import {
   type TeamsByMatch,
 } from "./scheduler";
 import { nowInRome } from "./clock";
+import { toMatchView, type MatchView } from "./view";
 import { agePhrase, validatePhone } from "./validation";
 import type {
   Gender,
@@ -1461,13 +1462,6 @@ export interface PublicPlayer {
   gender: Gender;
 }
 
-/** Partita nella forma attesa dai componenti pubblici (compatibile con MatchView). */
-export interface PublicMatch extends MatchRow {
-  sets: SetScoreRow[];
-  teamAName: string;
-  teamBName: string;
-}
-
 export interface PublicStanding extends StandingRow {
   teamName: string;
 }
@@ -1478,7 +1472,7 @@ export interface TeamPublicView {
   tournamentName: string;
   tournamentYear: number;
   players: PublicPlayer[];
-  matches: PublicMatch[];
+  matches: MatchView[];
   group: { name: string; standings: PublicStanding[] } | null;
 }
 
@@ -1532,12 +1526,7 @@ export function getTeamPublicView(teamId: number): TeamPublicView | null {
          ORDER BY phase = 'knockout', round, bracket_pos, id`,
       )
       .all(tournament.id, team.id, team.id) as MatchRow[]
-  ).map((m) => ({
-    ...m,
-    sets: sets.get(m.id) ?? [],
-    teamAName: m.team_a !== null ? (names.get(m.team_a) ?? "?") : "—",
-    teamBName: m.team_b !== null ? (names.get(m.team_b) ?? "?") : "—",
-  }));
+  ).map((m) => toMatchView(m, names, sets));
 
   let group: TeamPublicView["group"] = null;
   if (team.group_id !== null) {

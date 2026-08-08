@@ -109,7 +109,7 @@ Append-only after this point. The implementing session does NOT relitigate; exec
 | 12 | Uptime check | check attivo | describe restituisce il check su setpoint.wishew.com | 1★ |
 | 13 | Restore drill | restore da bucket | DB ripristinato contiene torneo e iscritti | 1★ (manuale, output in Surprises) |
 
-COVERAGE: 13/13 paths (100%)
+COVERAGE: 11/13 paths automatizzati + 2 verificati manualmente/in review (riga 10 Auto-refresh: code review del guard visibilityState; riga 13 Restore drill: manuale, output in Surprises)
 
 ### Exhaustiveness note
 La matrice è l'unione di: (superfici nuove del run) × (happy path + il loro edge/error più probabile in gara). Le combinazioni interne dello scheduler (pool×capienze) sono coperte dalla proprietà random di W3.1, non enumerate; le 23 action × 2 ruoli sono coperte dal campione riga 6 + review del mapping requireAdmin/requireScorer (non si enumerano 46 combinazioni).
@@ -145,7 +145,8 @@ La matrice è l'unione di: (superfici nuove del run) × (happy path + il loro ed
 - [x] W8.1 Playwright full-flow (2026-08-08: `make test-e2e-full` verde da build pulita in 7,6s, `npm test` 166/166, `npx next typegen && npx tsc --noEmit` pulito, `make test-e2e` smoke verde)
 - [x] W9.1 docs (2026-08-08: deploy/README.md, README.md, tech-debt.md; `make check` verde dopo `npx next typegen`, 166/166 test)
 - [ ] W9.2 follow-up filed a PR time
-- [ ] Review round + fixes
+- [x] Review round 1 (2026-08-08: security+architecture+test, findings in `quality_reports/reviews/2026-08-07_nightrun-miglioramenti/001-findings.md`)
+- [x] Fix round 1 (2026-08-08: M1 XFF-ultimo, M2 toMatchView condiviso, m1 open-redirect backslash, m2 formatSchedule senza `new Date`, m5 COVERAGE onesta; `npm test` 167/167, `npx next typegen && npx tsc --noEmit` pulito, `make test-e2e` verde. m3/m4 accettati come tech-debt dall'orchestratore)
 - [ ] PR + SCORE
 - [ ] Close-out (plan → completed/, retrospettiva)
 
@@ -374,6 +375,25 @@ a "non sopravvive a un riavvio"), non è sparito. Stessa cosa in
 accettabile l'assenza di lockout" era diventata falsa dentro un commento a un
 comando che si copia-incolla.
 
+### Fix round 1 (2026-08-08)
+
+`formatSchedule` senza `new Date` (m2): confrontando vecchio e nuovo output su
+quattro istanti, sono byte-identici **anche** con `TZ=Europe/Rome` sulla
+macchina di sviluppo, non solo su un server UTC. È la prova che il vecchio
+codice era corretto solo per fortuna: `new Date("...T10:00")` legge la stringa
+come ora locale, quindi rendeva 10:00 su un server UTC ma avrebbe reso un altro
+orario altrove. La nuova versione prende l'ora tale e quale dalla stringa e usa
+`Date.UTC` solo per il nome del giorno/mese (indipendente dal fuso), quindi è
+corretta ovunque a parità di output.
+
+Ciclo di import repo↔view (M2): estrarre `toMatchView` in `view.ts` e usarlo in
+`repo.ts` crea un ciclo (view importa già molte funzioni da repo). È benigno
+perché nessuno dei due usa l'altro a livello di modulo: `toMatchView` è chiamata
+solo dentro `getTeamPublicView`, e view chiama le funzioni di repo solo dentro i
+suoi body. Le function declaration sono hoisted, quindi il binding esiste quando
+serve. Confermato da `npm test` verde (repo.test.ts e teamPublicView.test.ts
+caricano proprio questa catena).
+
 ## Decisions
 (append-only; execution-time decisions land here)
 
@@ -426,6 +446,8 @@ comando che si copia-incolla.
 | 57 | (W9.1) `SCOREKEEPER_PIN` nel comando di deploy documentato benché opzionale | il `--set-secrets` di riferimento include entrambi i secret, con accanto la frase esplicita che togliendolo l'app torna al solo admin | il comando del README è quello che si copia-incolla sotto pressione: documentare la variante minima e lasciare l'aggiunta all'iniziativa produce deploy senza segnapunti proprio nei giorni in cui serve | il ruolo segnapunti smette di essere la configurazione attesa |
 | 58 | (W9.1) Righe di tech-debt chiuse: cancellate, non spuntate | tolte le righe "cookie admin derivato dal PIN" (chiusa da W4.1) e "rigenerazione del calendario a torneo in corso" (chiusa da W5.2); la seconda è sostituita da una riga sul residuo (il full regenerate resta cieco all'occupazione per campo, follow-up W9.2a) | è la regola scritta nell'ABOUTME del file; una riga chiusa che resta è un falso positivo permanente, ma cancellare senza registrare il residuo perderebbe l'unica parte ancora vera | il registro acquisisce uno storico dei chiusi |
 | 59 | (W9.1) Dove si documenta il re-login obbligatorio | in `deploy/README.md`, sotto il comando di deploy, non tra i rischi accettati | non è un rischio da accettare ma un passo della procedura: chi deploya deve leggerlo prima di lanciare, e la verifica post-rollout (entrambi i PIN) sta lì accanto | il ponte dai vecchi cookie viene reintrodotto |
+| 60 | (fix round 1 / M2) Dove vive la costruzione di `MatchView` | helper esportato `toMatchView(m, teamNameById, setsByMatch)` in `view.ts`, usato da `buildTournamentView` e da `getTeamPublicView` (repo.ts); `PublicMatch` eliminato, `TeamPublicView.matches` è ora `MatchView[]` | erano due copie identiche della forma e della logica dei placeholder ("—"/"?"): un solo punto le tiene allineate. Il payload pubblico non cambia forma (stesse chiavi) né espone campi nuovi: le colonne sensibili restano fuori dalla SELECT (decisione 21), l'helper aggiunge solo set e nomi già presenti. `repo.ts` importa da `view.ts`: ciclo benigno (solo funzioni chiamate a runtime, nessun uso top-level), confermato da `npm test` verde | i campi sensibili entrano in `MatchRow` o le due viste divergono per requisito |
+| 61 | (fix round 1 / M1) Quale segmento di `x-forwarded-for` chiave il lockout | l'ULTIMO, non il primo | dietro Cloud Run il proxy di Google appende l'IP reale in coda a XFF; i segmenti che lo precedono sono forniti dal client e falsificabili. Col leftmost un attaccante aggira il lockout ruotando l'header (brute force) o blocca l'admin iniettando il suo IP (DoS). Rivede la decisione 33, che copre solo l'header **assente** (fallback "sconosciuto"), non quale segmento leggere | il servizio passa dietro un proxy con un numero diverso di hop o un header dedicato (`x-real-ip`) |
 
 ## Outcomes & Retrospective
 (fill at close)

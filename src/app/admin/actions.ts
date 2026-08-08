@@ -11,9 +11,14 @@ function errorMessage(e: unknown): string {
 }
 
 function done(back: string, error: string | null): never {
-  // back arriva da campi hidden: si accettano solo path interni,
-  // mai URL assoluti (open redirect).
-  const safeBack = back.startsWith("/") && !back.startsWith("//") ? back : "/admin";
+  // back arriva da campi hidden: si accettano solo path interni, mai URL
+  // assoluti (open redirect). Oltre a "//" si rifiuta anche "/\": i browser
+  // normalizzano il backslash a "/", quindi "/\evil.com" diventa
+  // protocol-relative verso un host esterno.
+  const safeBack =
+    back.startsWith("/") && !back.startsWith("//") && !back.startsWith("/\\")
+      ? back
+      : "/admin";
   revalidatePath("/");
   redirect(error ? `${safeBack}?error=${encodeURIComponent(error)}` : safeBack);
 }
