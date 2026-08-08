@@ -77,7 +77,7 @@ Append-only after this point. The implementing session does NOT relitigate; exec
 - [ ] W5.3 Deploy B (W3+W5 insieme) + verifica prod.
 
 ### W6 - archivio edizioni (deploy D con W6 finale)
-- [ ] W6.1 `/storico`: tornei status=finished (anno, nome, podio da buildTournamentView); `/storico/[id]`: vista read-only (classifiche, tabellone, risultati), 404 se non finished; link nel footer/home. Niente contatti né dati player sensibili. Test repo per lo scoping.
+- [x] W6.1 `/storico`: tornei status=finished (anno, nome, podio da buildTournamentView); `/storico/[id]`: vista read-only (classifiche, tabellone, risultati), 404 se non finished; link nel footer/home. Niente contatti né dati player sensibili. Test repo per lo scoping.
 - [ ] W6.2 Deploy D + verifica prod.
 
 ### W7 - operatività (no deploy)
@@ -139,7 +139,8 @@ La matrice è l'unione di: (superfici nuove del run) × (happy path + il loro ed
 - [ ] W4.3-W4.4 secret SCOREKEEPER_PIN + deploy C
 - [x] W5.1-W5.2 riempi-buchi + timezone (2026-08-08: `npm test` 157/157, `npx next typegen && npx tsc --noEmit` pulito, `make test-e2e` verde, probe di rendering sulla pagina partite verde)
 - [ ] W5.3 deploy B (W3+W5)
-- [ ] W6 archivio + deploy D
+- [x] W6.1 archivio edizioni (2026-08-08: `npm test` 166/166, `npx next typegen && npx tsc --noEmit` pulito, `make test-e2e` verde, probe HTTP dello storico verde)
+- [ ] W6.2 deploy D
 - [ ] W7 operatività
 - [ ] W8 Playwright
 - [ ] W9 docs + follow-ups
@@ -272,6 +273,42 @@ Evidenza di rendering (server standalone, DB seedato con un torneo in stato
 PROBE OK: admin vede Completa calendario + Genera con avviso, segnapunti no
 ```
 
+### W6 archivio edizioni (2026-08-08)
+
+Riusare `buildTournamentView` per la pagina d'archivio significa **restituire la
+riga del torneo e le righe delle squadre**, cioè esattamente i due posti dove
+vivono `contact_info`, `contact` e `age_confirmed`. Non è una preoccupazione
+teorica: rimettendo la riga del torneo nella vista (`...t` in
+`buildArchiveView`) il test diventa rosso citando il numero di telefono.
+
+```
+AssertionError: expected '{"id":1,"name":"Edizione conclusa","y…' not to contain '3701234567'
+Received: ... "contact_info":"Info al 3701234567" ...
+```
+
+Da qui `ArchiveView`: stesse strutture della home (classifiche, `MatchView`,
+podio, mappa dei nomi) meno `tournament` e meno i `teams` dei gironi.
+`buildTournamentView` resta il motore, la vista d'archivio è il filtro.
+
+Seconda trappola, presa prima di spedire: `StandingsTable` accetta `linkTeams`,
+che nella home rimanda a `/squadra/[id]`. Quella pagina è scoped al torneo
+**attivo** (decisione 20), quindi in una classifica d'archivio ogni nome
+sarebbe stato un link a un 404. Nell'archivio `linkTeams` non si passa, e la
+probe lo verifica sull'HTML servito (nessuna occorrenza di `squadra/`).
+
+Terza: `podium()` legge solo partite di tabellone, quindi un torneo
+`groups_only` concluso finisce in archivio **senza podio**. È lo stesso
+comportamento della home (che mostra il podio solo se `podium.first` esiste) e
+resta così: dedurre il vincitore dalle classifiche è ambiguo con più gironi.
+
+Evidenza (server standalone, DB seedato con un'edizione conclusa e una in
+corso):
+
+```
+torneo concluso: 1, torneo in corso: 2
+PROBE OK: /storico lista solo i finished, dettaglio 200 e pulito, 404 su torneo in corso/id ignoto, link in home
+```
+
 ## Decisions
 (append-only; execution-time decisions land here)
 
@@ -310,6 +347,11 @@ PROBE OK: admin vede Completa calendario + Genera con avviso, segnapunti no
 | 43 | (W5.2) Riposo oltre il bordo della generazione | sesto parametro opzionale `busyBefore` su `buildSchedule` con le squadre dell'ultimo slot occupato; il chiamante lo passa solo se il primo slot libero gli è adiacente | senza, il riempi-buchi rimetteva in campo allo slot successivo squadre appena scese (vedi Surprises W5): sarebbe stata una regressione silenziosa proprio della garanzia introdotta da W3, e solo nel percorso usato a torneo in corso | si passa a un modello per-campo che conosce già l'occupazione reale |
 | 44 | (W5.2) Finestra esaurita vs configurazione mancante | nessuno slot residuo → ritorno onesto `{placed: 0, unplaced: n}` senza toccare nulla; giornate o campi assenti → eccezione con messaggio | la finestra esaurita è uno stato legittimo del torneo (l'admin decide se aggiungere una giornata), l'assenza di giornate è una configurazione incompleta da segnalare subito | l'interfaccia distingue i due casi con un messaggio proprio invece che con il conteggio |
 | 45 | (W5.2) Nessun ramo di clear in `fillScheduleGaps` | la funzione non ha proprio l'istruzione che cancella orari: solo `UPDATE` sulle partite senza orario | è la differenza sostanziale con `generateSchedule` a torneo in corso, e va garantita dalla forma del codice, non dalla disciplina di chi lo chiama | serve un "risistema da qui in poi" che sposti anche partite già programmate |
+| 46 | (W6.1) Dove sta lo scoping dell'archivio | nel listing è la query (`WHERE status = 'finished'`), nel dettaglio è `buildArchiveView`, che controlla lo stato **prima** di costruire la vista e ritorna null | stessa forma della decisione 20: se il torneo non è in ambito non viene proprio letto, e la pagina fa `notFound()` senza logica propria | l'archivio deve mostrare anche edizioni annullate o sospese |
+| 47 | (W6.1) Tipo dedicato `ArchiveView` invece di `TournamentView` | la vista d'archivio ricopia da `buildTournamentView` solo nomi, classifiche, partite e podio; `tournament` (contact_info) e i `teams` dei gironi (contact, age_confirmed) restano fuori | riusare `TournamentView` esporrebbe i due unici posti dove vivono i dati non pubblici, e il filtro sarebbe a carico del componente di pagina invece che del tipo (verificato: rimettendoli dentro, il test diventa rosso) | i campi sensibili escono da `tournaments`/`teams` e le righe diventano pubbliche per costruzione |
+| 48 | (W6.1) Classifiche d'archivio senza `linkTeams` | le classifiche del dettaglio mostrano i nomi come testo, non come link a `/squadra/[id]` | quella pagina è scoped al torneo attivo (decisione 20): in archivio ogni link sarebbe un 404 garantito | nasce una pagina squadra per le edizioni passate |
+| 49 | (W6.1) Podio di un torneo senza tabellone | resta vuoto: `podium()` legge solo partite knockout e non si deduce il vincitore dalle classifiche | con più gironi il primo assoluto è ambiguo; la home si comporta già così, e un podio inventato in archivio resterebbe lì per sempre | i tornei `groups_only` diventano la norma e serve un criterio di classifica generale |
+| 50 | (W6.1) Dove sta il link allo storico | nel footer del root layout (`src/app/layout.tsx`), quindi su tutte le pagine pubbliche, non dentro `page.tsx` | la home non ha un footer proprio e il torneo in corso occupa già tutto il corpo: il footer è l'unica zona che resta raggiungibile anche a torneo iniziato | l'archivio merita una voce di navigazione in testata |
 
 ## Outcomes & Retrospective
 (fill at close)

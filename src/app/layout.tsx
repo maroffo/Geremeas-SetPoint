@@ -37,6 +37,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         </main>
         <footer className="border-t border-amber-200 bg-amber-50 py-4 text-center text-xs text-stone-500">
           Geremeas SetPoint — torneo estivo di beach volley
+          <span className="px-2 text-amber-300">·</span>
+          <Link href="/storico" className="hover:text-sky-700 hover:underline">
+            Storico edizioni
+          </Link>
         </footer>
       </body>
     </html>

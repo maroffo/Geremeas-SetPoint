@@ -1404,6 +1404,54 @@ export function podium(tournamentId: number): Podium {
 }
 
 // ---------------------------------------------------------------------------
+// Archivio edizioni
+// ---------------------------------------------------------------------------
+
+export interface ArchivedTournament {
+  id: number;
+  name: string;
+  year: number;
+  /** Nomi delle prime tre squadre; null dove il tabellone non le ha decise. */
+  podium: { first: string | null; second: string | null; third: string | null };
+}
+
+function teamNameById(teamId: number | null): string | null {
+  if (teamId === null) return null;
+  const row = db.prepare("SELECT name FROM teams WHERE id = ?").get(teamId) as
+    | { name: string }
+    | undefined;
+  return row?.name ?? null;
+}
+
+/**
+ * Edizioni concluse, dalla più recente. Lo scoping sta nella query: un torneo
+ * ancora in corso non compare in archivio nemmeno se ha già un podio.
+ *
+ * Legge solo id, nome, anno e i nomi delle squadre sul podio: niente
+ * contact_info del torneo, niente righe dei giocatori.
+ */
+export function listFinishedTournaments(): ArchivedTournament[] {
+  const rows = db
+    .prepare(
+      `SELECT id, name, year FROM tournaments
+       WHERE status = 'finished' ORDER BY year DESC, id DESC`,
+    )
+    .all() as { id: number; name: string; year: number }[];
+
+  return rows.map((t) => {
+    const p = podium(t.id);
+    return {
+      ...t,
+      podium: {
+        first: teamNameById(p.first),
+        second: teamNameById(p.second),
+        third: teamNameById(p.third),
+      },
+    };
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Vista pubblica della squadra
 // ---------------------------------------------------------------------------
 

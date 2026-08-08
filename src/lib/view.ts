@@ -1,5 +1,6 @@
 import {
   allSets,
+  getTournament,
   groupStandings,
   groupTeams,
   listGroups,
@@ -102,6 +103,57 @@ export function buildTournamentView(t: TournamentRow): TournamentView {
     totalKnockoutRounds,
     podium: podium(t.id),
     upcoming,
+  };
+}
+
+export interface ArchiveGroupView {
+  name: string;
+  standings: StandingRow[];
+  matches: MatchView[];
+}
+
+/**
+ * Vista di un'edizione conclusa: le stesse strutture della home meno le righe
+ * che portano dati non pubblici, cioè `tournament` (contact_info) e i
+ * `teams` dei gironi (contact, age_confirmed). Restano nomi delle squadre,
+ * risultati e classifiche.
+ */
+export interface ArchiveView {
+  id: number;
+  name: string;
+  year: number;
+  teamNames: Map<number, string>;
+  groups: ArchiveGroupView[];
+  knockoutRounds: MatchView[][];
+  thirdPlace: MatchView | null;
+  totalKnockoutRounds: number;
+  podium: Podium;
+}
+
+/**
+ * Vista read-only di un'edizione conclusa: null se il torneo non esiste o non
+ * è `finished`, così la pagina può rispondere 404 senza altri controlli. Il
+ * controllo sullo stato precede la costruzione della vista.
+ */
+export function buildArchiveView(tournamentId: number): ArchiveView | null {
+  const t = getTournament(tournamentId);
+  if (!t || t.status !== "finished") return null;
+
+  const view = buildTournamentView(t);
+  return {
+    id: t.id,
+    name: t.name,
+    year: t.year,
+    teamNames: view.teamNames,
+    groups: view.groups.map((g) => ({
+      name: g.group.name,
+      standings: g.standings,
+      matches: g.matches,
+    })),
+    knockoutRounds: view.knockoutRounds,
+    thirdPlace: view.thirdPlace,
+    totalKnockoutRounds: view.totalKnockoutRounds,
+    podium: view.podium,
   };
 }
 
