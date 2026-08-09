@@ -1,10 +1,12 @@
 import { db } from "./db";
 import {
   advanceTarget,
+  effectiveAdvancePerGroup,
   firstRoundPairings,
   nextPowerOfTwo,
   roundCount,
   seedQualifiers,
+  usesSmallTournamentFormula,
 } from "./bracket";
 import { roundRobin } from "./roundRobin";
 import { validateMatchScore } from "./score";
@@ -470,6 +472,14 @@ export function generateGroups(tournamentId: number, numGroups: number): void {
     .all(tournamentId) as { id: number }[];
 
   if (teams.length < 2) throw new Error("Servono almeno 2 squadre attive");
+  if (
+    t.format === "groups_knockout" &&
+    usesSmallTournamentFormula(teams.length) &&
+    numGroups !== 1
+  )
+    throw new Error(
+      `Con ${teams.length} squadre è previsto un girone unico all'italiana`,
+    );
   if (numGroups < 1 || numGroups > teams.length / 2)
     throw new Error(
       `Numero gironi non valido: con ${teams.length} squadre puoi creare da 1 a ${Math.floor(teams.length / 2)} gironi`,
@@ -733,8 +743,39 @@ export function generateKnockout(tournamentId: number): void {
   const t = getTournament(tournamentId);
   if (!t) throw new Error("Torneo non trovato");
 
+  const groups = listGroups(tournamentId);
+  const activeTeams = listActiveTeams(tournamentId);
+  const activeTeamCount = activeTeams.length;
+  const activeTeamIds = new Set(activeTeams.map((team) => team.id));
+  const groupedTeams = groups.flatMap((group) => groupTeams(group.id));
+  const hasCurrentGroupRoster =
+    groupedTeams.length === activeTeamCount &&
+    groupedTeams.every((team) => activeTeamIds.has(team.id));
+
+  if (
+    t.format === "groups_knockout" &&
+    groups.length > 0 &&
+    !hasCurrentGroupRoster
+  ) {
+    const instruction = usesSmallTournamentFormula(activeTeamCount)
+      ? "rigenerare il girone unico"
+      : "rigenerare i gironi";
+    throw new Error(
+      `Le squadre attive sono cambiate: devi ${instruction} prima del tabellone`,
+    );
+  }
+  if (
+    t.format === "groups_knockout" &&
+    usesSmallTournamentFormula(activeTeamCount) &&
+    groups.length !== 1
+  ) {
+    throw new Error(
+      `Con ${activeTeamCount} squadre devi generare un girone unico all'italiana prima del tabellone`,
+    );
+  }
+
   let seeds: number[];
-  if (t.format === "knockout_only" || listGroups(tournamentId).length === 0) {
+  if (t.format === "knockout_only" || groups.length === 0) {
     seeds = (
       db
         .prepare(
@@ -753,8 +794,15 @@ export function generateKnockout(tournamentId: number): void {
       throw new Error(
         `Ci sono ancora ${unfinished.n} partite di girone da giocare`,
       );
-    const standings = listGroups(tournamentId).map((g) => groupStandings(g.id));
-    seeds = seedQualifiers(standings, t.advance_per_group);
+    const standings = groups.map((g) => groupStandings(g.id));
+    const advancePerGroup =
+      t.format === "groups_knockout" && standings.length === 1
+        ? effectiveAdvancePerGroup(
+            activeTeamCount,
+            t.advance_per_group,
+          )
+        : t.advance_per_group;
+    seeds = seedQualifiers(standings, advancePerGroup);
   }
 
   if (seeds.length < 2)
@@ -785,8 +833,8 @@ export function generateKnockout(tournamentId: number): void {
         insert.run(tournamentId, r, pos, 0, null, null);
       }
     }
-    // Finale 3º/4º posto (solo se ci sono semifinali)
-    if (rounds >= 2) {
+    // Finale 3º/4º posto (solo con due semifinali effettive)
+    if (rounds >= 2 && seeds.length >= 4) {
       insert.run(tournamentId, rounds, 0, 1, null, null);
     }
 

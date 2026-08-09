@@ -68,12 +68,20 @@ describe("firstRoundPairings", () => {
     expect(byeTeams).toContain(20);
   });
 
-  it("4 squadre: nessun bye", () => {
-    const pairings = firstRoundPairings([1, 2, 3, 4]);
-    expect(pairings).toHaveLength(2);
-    expect(pairings.every((p) => p.teamA !== null && p.teamB !== null)).toBe(
-      true,
-    );
+  it("4 squadre: semifinali 1ª-4ª e 2ª-3ª senza bye", () => {
+    expect(firstRoundPairings([1, 2, 3, 4])).toEqual([
+      { pos: 0, teamA: 1, teamB: 4 },
+      { pos: 1, teamA: 2, teamB: 3 },
+    ]);
+  });
+
+  it("5 squadre: solo 4ª e 5ª giocano il quarto di finale", () => {
+    expect(firstRoundPairings([1, 2, 3, 4, 5])).toEqual([
+      { pos: 0, teamA: 1, teamB: null },
+      { pos: 1, teamA: 4, teamB: 5 },
+      { pos: 2, teamA: 2, teamB: null },
+      { pos: 3, teamA: 3, teamB: null },
+    ]);
   });
 });
 

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Bracket } from "@/components/Bracket";
 import { MatchLine } from "@/components/MatchLine";
 import { StandingsTable } from "@/components/StandingsTable";
+import { effectiveAdvancePerGroup } from "@/lib/bracket";
 import {
   getActiveTournament,
   listTeams,
@@ -51,6 +52,19 @@ export default function HomePage() {
   const singles = listUnassignedSingles(tournament.id).filter(
     (p) => !p.is_reserve,
   );
+  const activeTeamIds = new Set(activeTeams.map((team) => team.id));
+  const groupedTeams = view.groups.flatMap((group) => group.teams);
+  const hasCurrentGroupRoster =
+    groupedTeams.length === activeTeams.length &&
+    groupedTeams.every((team) => activeTeamIds.has(team.id));
+  const highlightedTeams = !hasCurrentGroupRoster
+    ? 0
+    : view.groups.length === 1
+      ? effectiveAdvancePerGroup(
+          activeTeams.length,
+          tournament.advance_per_group,
+        )
+      : tournament.advance_per_group;
 
   return (
     <div className="space-y-6">
@@ -141,9 +155,9 @@ export default function HomePage() {
                 standings={g.standings}
                 teamNames={view.teamNames}
                 highlight={
-                  tournament.format === "groups_only"
-                    ? 0
-                    : tournament.advance_per_group
+                  tournament.format === "groups_knockout"
+                    ? highlightedTeams
+                    : 0
                 }
               />
               <h3 className="mt-4 mb-1 text-sm font-semibold text-stone-600">
