@@ -2,7 +2,7 @@
 // ABOUTME: comportamento sui due cambi d'ora del 2026 (29 marzo e 25 ottobre)
 
 import { describe, expect, it } from "vitest";
-import { nowInRome, todayInRome } from "../clock";
+import { nowInRome, nowInRomeCeilMinute, todayInRome } from "../clock";
 
 describe("nowInRome", () => {
   it("restituisce l'ora di parete di Roma zero-padded", () => {
@@ -38,6 +38,17 @@ describe("nowInRome", () => {
     const before = nowInRome(new Date("2026-10-25T00:10:00Z")); // 02:10 CEST
     const after = nowInRome(new Date("2026-10-25T01:40:00Z")); // 02:40 CET
     expect(before < after).toBe(true);
+  });
+});
+
+describe("nowInRomeCeilMinute", () => {
+  it("mantiene il minuto esatto e arrotonda in avanti i secondi", () => {
+    expect(nowInRomeCeilMinute(new Date("2026-08-10T16:45:00Z"))).toBe(
+      "2026-08-10T18:45",
+    );
+    expect(nowInRomeCeilMinute(new Date("2026-08-10T16:45:59Z"))).toBe(
+      "2026-08-10T18:46",
+    );
   });
 });
 

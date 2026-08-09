@@ -144,10 +144,11 @@ Se non restano slot liberi, "Completa calendario" non inventa spazio: lascia le
 partite senza orario e lo dice. La risposta è aggiungere una giornata (o un
 campo) e rilanciarlo.
 
-Il calendario lascia sempre almeno uno slot di riposo a una squadra tra due sue
-partite, quando la capienza lo consente. A parità di giornate configurate questo
-allunga il calendario, non fa perdere partite: se lo spazio è stretto le partite
-vengono collocate comunque, riposo o no.
+Il calendario separa di 5 minuti due incontri consecutivi; dopo l'ultima
+partita della giornata non serve una pausa aggiuntiva. La durata configurata
+indica solo il gioco: con 40 minuti gli inizi sono 18:00, 18:45, 19:30 e così
+via. Non viene più inserito un intero slot vuoto tra due partite della stessa
+squadra.
 
 ## Monitoraggio
 

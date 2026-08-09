@@ -1,5 +1,5 @@
 // ABOUTME: Test d'integrazione del calendario: giornate/campi CRUD e generateSchedule
-// ABOUTME: su un torneo reale con gironi, verificando slot, campi e vincoli squadra
+// ABOUTME: su un torneo reale con gironi, verificando slot, campi e pausa fissa
 
 import { afterAll, describe, expect, it } from "vitest";
 import fs from "node:fs";
@@ -81,17 +81,15 @@ describe("giornate, campi e generazione calendario", () => {
         teamSlots.add(key);
       }
     }
-    // 6 partite da 40' su 2 campi: un round per slot. In ogni girone da 3 le
-    // stesse squadre tornano in campo a ogni round, quindi il riposo mette
-    // uno slot cuscinetto e il terzo round scivola sulla giornata dopo.
+    // 6 partite da 40' su 2 campi: un round per slot, con 5 minuti di pausa.
     const times = [...new Set(matches.map((m) => m.scheduled_at!))].sort();
     expect(times).toEqual([
       "2026-08-10T18:00",
-      "2026-08-10T19:20",
-      "2026-08-11T18:00",
+      "2026-08-10T18:45",
+      "2026-08-10T19:30",
     ]);
 
-    // Nessuna squadra in due slot attaccati nella stessa giornata (40').
+    // Ogni squadra ha almeno 5 minuti tra la fine stimata e l'inizio seguente.
     const timesByTeam = new Map<number, string[]>();
     for (const m of matches)
       for (const team of [m.team_a, m.team_b]) {
@@ -109,7 +107,7 @@ describe("giornate, campi e generazione calendario", () => {
               Number(time.slice(3)) -
               (Number(prevTime.slice(0, 2)) * 60 + Number(prevTime.slice(3)))
             : Infinity;
-        expect(gap).toBeGreaterThan(40);
+        expect(gap).toBeGreaterThanOrEqual(45);
       }
     }
   });
@@ -211,7 +209,7 @@ describe("giornate, campi e generazione calendario", () => {
       advancePerGroup: 2,
       matchMinutes: 60,
     });
-    repo.addDay(tinyId, "2026-08-10", "18:00", "20:00"); // 2 slot
+    repo.addDay(tinyId, "2026-08-10", "18:00", "20:00"); // 1 slot da 60' + pausa
     repo.addCourt(tinyId, "Unico");
     for (let i = 1; i <= 4; i++) {
       const teamId = repo.registerTeam(
@@ -224,7 +222,7 @@ describe("giornate, campi e generazione calendario", () => {
     }
     repo.generateGroups(tinyId, 1); // 1 girone da 4 → 6 partite
     const { placed, unplaced } = repo.generateSchedule(tinyId);
-    expect(placed).toBe(2);
-    expect(unplaced).toBe(4);
+    expect(placed).toBe(1);
+    expect(unplaced).toBe(5);
   });
 });

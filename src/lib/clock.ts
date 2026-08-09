@@ -29,6 +29,16 @@ export function nowInRome(at: Date = new Date()): string {
   return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
 }
 
+/**
+ * Primo minuto non precedente all'istante indicato, in ora di Roma.
+ * A HH:MM:00 resta HH:MM; con secondi o millisecondi avanza a HH:MM+1.
+ */
+export function nowInRomeCeilMinute(at: Date = new Date()): string {
+  const minute = 60_000;
+  const rounded = Math.ceil(at.getTime() / minute) * minute;
+  return nowInRome(new Date(rounded));
+}
+
 /** Data di parete di Roma come "YYYY-MM-DD". */
 export function todayInRome(at: Date = new Date()): string {
   return nowInRome(at).slice(0, 10);

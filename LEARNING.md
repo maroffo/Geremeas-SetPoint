@@ -60,6 +60,19 @@ Regola d'oro dei layer: **i dati sensibili dei giocatori (`skill`, `contact`, `a
 
 **Takeaway.** La rete di sicurezza (doppia passata) è tranquillizzante ma è il lookahead esatto a reggere l'invariante. La cosa fragile è proprio quella: una modifica futura che sbaglia il lookahead romperebbe la garanzia in silenzio, con la doppia passata a nasconderla. Documentato nel codice per questo.
 
+### 2026-08-09: durata partita e pausa sono due concetti distinti
+
+**Contesto.** Il cuscinetto di uno slot trasformava 40 minuti di gioco in inizi
+alle 18:00 e 19:20: molto più dei 5 minuti di cambio campo desiderati.
+
+**Soluzione.** La durata configurata resta il tempo di gioco; lo scheduler usa
+un intervallo fisso `durata + 5 minuti` e non inserisce più slot vuoti. Il
+riempi-buchi calcola la fine stimata dell'ultima partita prima di cercare il
+prossimo orario, così resta sicuro anche su calendari creati col vecchio passo.
+
+**Takeaway.** Modellare esplicitamente la pausa evita di usare uno slot intero
+come approssimazione: con 40 minuti gli inizi sono 18:00, 18:45, 19:30.
+
 ### 2026-08-08: dietro Cloud Run il primo IP di `x-forwarded-for` è dell'attaccante
 
 **Contesto.** Lockout dei login (5 tentativi → 15 min) keyed sull'IP. Preso `x-forwarded-for.split(",")[0]`.
@@ -82,5 +95,5 @@ Regola d'oro dei layer: **i dati sensibili dei giocatori (`skill`, `contact`, `a
 
 - **REPRODUCE prima del fix.** Il bug del tabellone è stato scritto come test rosso e registrato PRIMA di toccare `repo.ts`. Rende il fix verificabile e impedisce di "fixare" la cosa sbagliata.
 - **Scoping in query, non nel codice.** Le pagine pubbliche (`/squadra/[id]`, `/storico`) filtrano torneo attivo/status/finished nella SELECT e leggono solo colonne esplicite. Il dato sensibile non entra nel payload perché non viene letto, non perché viene rimosso dopo.
-- **Astrazioni della taglia giusta.** `clock.ts` iniettabile (parametro `Date` con default, non un'interfaccia `Clock`), `TeamsByMatch`, `busyBefore` opzionale: aggiunte quando servono, senza overengineering speculativo.
+- **Astrazioni della taglia giusta.** `clock.ts` resta iniettabile con un parametro `Date`; `TeamsByMatch` e `busyBefore` sono stati rimossi quando la pausa fissa ha reso inutile il cuscinetto a slot intero.
 - **Verifica in prod ciò che i test non possono.** Il re-login post-rollout (sessioni riscritte, vecchi cookie invalidi) è stato verificato nel browser reale: admin, logout+revoca, scorekeeper con nav ridotta. I test coprono la logica; il browser copre "funziona davvero dopo il deploy".

@@ -24,8 +24,8 @@ L'analisi funzionale completa è in [ANALISI.md](ANALISI.md).
   terzo set a 15, vantaggi con 2 punti di scarto) — regole configurabili per
   torneo. Gestione forfait con vittoria a tavolino.
 - **Calendario**: campo e orario per ogni partita, sezione "prossime partite".
-  Il calendario lascia a ogni squadra almeno uno slot di riposo tra due sue
-  partite quando la capienza lo consente. A torneo iniziato **Completa
+  Tra due incontri consecutivi ci sono sempre 5 minuti di pausa: con partite
+  da 40 minuti gli inizi sono 18:00, 18:45, 19:30 e così via. A torneo iniziato **Completa
   calendario** dà un orario solo alle partite che non ce l'hanno, in coda a
   quelle già programmate, senza toccare nulla di esistente; **Genera
   calendario** rifà tutto da capo e va usato prima dell'inizio.

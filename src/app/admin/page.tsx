@@ -1,6 +1,7 @@
 import { FormMessages } from "@/components/FormMessages";
 import { btnPrimary, btnSecondary, Card, inputCls } from "@/components/ui";
 import { requireAdmin } from "@/lib/auth";
+import { MATCH_BREAK_MINUTES } from "@/lib/scheduler";
 import {
   getActiveTournament,
   hasPoster,
@@ -177,7 +178,7 @@ function SettingsForm({
       </div>
       <div>
         <label className="mb-1 block text-sm font-medium">
-          Durata media partita (minuti)
+          Durata partita (minuti)
         </label>
         <input
           name="matchMinutes"
@@ -187,6 +188,10 @@ function SettingsForm({
           defaultValue={t?.match_minutes ?? 40}
           className={`${inputCls} w-full`}
         />
+        <p className="mt-1 text-xs text-stone-500">
+          Il calendario aggiunge automaticamente {MATCH_BREAK_MINUTES} minuti
+          di pausa tra due partite.
+        </p>
       </div>
       <div className="sm:col-span-2">
         <label className="mb-1 block text-sm font-medium">

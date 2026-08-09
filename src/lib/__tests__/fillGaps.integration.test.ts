@@ -42,7 +42,7 @@ function tournamentWithSchedule(name: string): number {
     advancePerGroup: 2,
     matchMinutes: 40,
   });
-  repo.addDay(id, "2026-08-10", "18:00", "21:20"); // 5 slot da 40'
+  repo.addDay(id, "2026-08-10", "18:00", "21:20"); // 4 slot da 40' + pausa
   repo.addCourt(id, "Campo 1");
   repo.addCourt(id, "Campo 2");
   for (let i = 1; i <= 4; i++) {
@@ -65,9 +65,9 @@ const byRound = (id: number, round: number) =>
 describe("fillScheduleGaps", () => {
   it("programma i buchi dopo l'ultimo slot occupato, senza toccare l'esistente", () => {
     const id = tournamentWithSchedule("Buchi");
-    // Il calendario pieno usa 18:00, 19:20 e 20:40 (uno slot di riposo tra i round).
+    // Il calendario pieno usa 18:00, 18:45 e 19:30 (40' + 5' di pausa).
     expect(byRound(id, 1)[0].scheduled_at).toBe("2026-08-10T18:00");
-    expect(byRound(id, 2)[0].scheduled_at).toBe("2026-08-10T19:20");
+    expect(byRound(id, 2)[0].scheduled_at).toBe("2026-08-10T18:45");
 
     // Round 1 giocato, round 3 rimasto senza orario (partite aggiunte dopo).
     for (const m of byRound(id, 1))
@@ -95,9 +95,9 @@ describe("fillScheduleGaps", () => {
     }
     expect(byRound(id, 1).every((m) => m.status === "finished")).toBe(true);
 
-    // Le nuove partite stanno dopo l'ultimo slot occupato (19:20) e riposano.
+    // Le nuove partite stanno dopo la fine stimata del round delle 18:45.
     for (const m of byRound(id, 3)) {
-      expect(m.scheduled_at).toBe("2026-08-10T20:40");
+      expect(m.scheduled_at).toBe("2026-08-10T19:30");
       expect(m.court).not.toBeNull();
     }
 
@@ -116,19 +116,50 @@ describe("fillScheduleGaps", () => {
     }
   });
 
+  it("rispetta fine e pausa anche su un calendario creato col vecchio passo", () => {
+    const id = tournamentWithSchedule("Legacy");
+    for (const m of byRound(id, 1))
+      repo.scheduleMatch(m.id, m.court, "2026-08-10T18:00");
+    for (const m of byRound(id, 2))
+      repo.scheduleMatch(m.id, m.court, "2026-08-10T19:20");
+    for (const m of byRound(id, 3)) repo.scheduleMatch(m.id, null, null);
+
+    const { placed, unplaced } = repo.fillScheduleGaps(
+      id,
+      romeClock("2026-08-10T16:30:00Z"),
+    );
+    expect({ placed, unplaced }).toEqual({ placed: 2, unplaced: 0 });
+    for (const m of byRound(id, 3))
+      expect(m.scheduled_at).toBe("2026-08-10T20:15");
+  });
+
+  it("non usa lo slot del minuto corrente quando sono già trascorsi secondi", () => {
+    const id = tournamentWithSchedule("Secondi");
+    for (const round of [2, 3])
+      for (const m of byRound(id, round)) repo.scheduleMatch(m.id, null, null);
+
+    const result = repo.fillScheduleGaps(
+      id,
+      romeClock("2026-08-10T16:45:59Z"), // 18:45:59 a Roma
+    );
+    expect(result).toEqual({ placed: 4, unplaced: 0 });
+    for (const m of byRound(id, 2))
+      expect(m.scheduled_at).toBe("2026-08-10T19:30");
+  });
+
   it("non usa slot già passati e conta onestamente ciò che resta fuori", () => {
     const id = tournamentWithSchedule("Ritardo");
     for (const round of [2, 3])
       for (const m of byRound(id, round)) repo.scheduleMatch(m.id, null, null);
 
-    // Sono le 20:10 di Roma: resta libero il solo slot delle 20:40.
+    // Sono le 20:10 di Roma: resta libero il solo slot delle 20:15.
     const { placed, unplaced } = repo.fillScheduleGaps(
       id,
       romeClock("2026-08-10T18:10:00Z"),
     );
     expect({ placed, unplaced }).toEqual({ placed: 2, unplaced: 2 });
 
-    for (const m of byRound(id, 2)) expect(m.scheduled_at).toBe("2026-08-10T20:40");
+    for (const m of byRound(id, 2)) expect(m.scheduled_at).toBe("2026-08-10T20:15");
     // Le partite senza posto restano senza orario: nessun ripiego nel passato.
     for (const m of byRound(id, 3)) expect(m.scheduled_at).toBeNull();
     for (const m of repo.listMatches(id))

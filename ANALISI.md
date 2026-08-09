@@ -50,7 +50,7 @@ Sistema di gestione del torneo estivo di beach volley di Geremeas.
 
 ## 3. Funzionalità aggiuntive proposte ("serve altro?")
 
-- **Calendario partite e campi**: assegnazione di orario e campo a ogni partita, con vista "prossime partite".
+- **Calendario partite e campi**: assegnazione di orario e campo a ogni partita, con vista "prossime partite" e pausa fissa di 5 minuti tra incontri consecutivi.
 - **Pagina pubblica** consultabile da smartphone senza login: tabellone, risultati live, classifiche.
 - **Gestione forfait/ritiri** di squadre a torneo in corso.
 - **Lista d'attesa / riserve** per rimpiazzare infortuni o rinunce.
