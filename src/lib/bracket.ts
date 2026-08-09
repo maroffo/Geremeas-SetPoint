@@ -1,5 +1,25 @@
 import type { StandingRow } from "./standings";
 
+export const SMALL_TOURNAMENT_MAX_TEAMS = 5;
+
+/** Formula speciale: girone unico e accesso di tutte le squadre al tabellone. */
+export function usesSmallTournamentFormula(teamCount: number): boolean {
+  return teamCount >= 2 && teamCount <= SMALL_TOURNAMENT_MAX_TEAMS;
+}
+
+/**
+ * Numero effettivo di qualificate da un girone unico.
+ * Nei tornei piccoli avanzano tutte; da 6 partecipanti vale la configurazione.
+ */
+export function effectiveAdvancePerGroup(
+  teamCount: number,
+  configuredAdvance: number,
+): number {
+  return usesSmallTournamentFormula(teamCount)
+    ? teamCount
+    : configuredAdvance;
+}
+
 /**
  * Ordina le qualificate per il seeding del tabellone a eliminazione:
  * prima tutte le prime classificate (ordinate per rendimento),

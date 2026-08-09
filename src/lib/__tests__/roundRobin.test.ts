@@ -18,11 +18,14 @@ describe("roundRobin", () => {
     expect(matches).toHaveLength(10);
 
     const count = new Map<number, number>();
+    const pairs = new Set<string>();
     for (const m of matches) {
       count.set(m.a, (count.get(m.a) ?? 0) + 1);
       count.set(m.b, (count.get(m.b) ?? 0) + 1);
+      pairs.add([m.a, m.b].sort((a, b) => a - b).join("-"));
     }
     for (const id of [1, 2, 3, 4, 5]) expect(count.get(id)).toBe(4);
+    expect(pairs.size).toBe(10);
   });
 
   it("in ogni giornata una squadra gioca al massimo una volta", () => {

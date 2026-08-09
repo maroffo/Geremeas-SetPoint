@@ -1,6 +1,10 @@
 import { FormMessages } from "@/components/FormMessages";
 import { StandingsTable } from "@/components/StandingsTable";
 import { btnPrimary, Card, inputCls } from "@/components/ui";
+import {
+  effectiveAdvancePerGroup,
+  usesSmallTournamentFormula,
+} from "@/lib/bracket";
 import { requireAdmin } from "@/lib/auth";
 import { getActiveTournament, listActiveTeams } from "@/lib/repo";
 import { buildTournamentView } from "@/lib/view";
@@ -23,8 +27,26 @@ export default async function AdminGroupsPage({
 
   const activeTeams = listActiveTeams(tournament.id);
   const view = buildTournamentView(tournament);
-  const maxGroups = Math.max(1, Math.floor(activeTeams.length / 2));
+  const smallTournament =
+    tournament.format === "groups_knockout" &&
+    usesSmallTournamentFormula(activeTeams.length);
+  const maxGroups = smallTournament
+    ? 1
+    : Math.max(1, Math.floor(activeTeams.length / 2));
   const suggested = Math.max(1, Math.round(activeTeams.length / 4));
+  const activeTeamIds = new Set(activeTeams.map((team) => team.id));
+  const groupedTeams = view.groups.flatMap((group) => group.teams);
+  const hasCurrentGroupRoster =
+    groupedTeams.length === activeTeams.length &&
+    groupedTeams.every((team) => activeTeamIds.has(team.id));
+  const highlightedTeams = !hasCurrentGroupRoster
+    ? 0
+    : view.groups.length === 1
+      ? effectiveAdvancePerGroup(
+          activeTeams.length,
+          tournament.advance_per_group,
+        )
+      : tournament.advance_per_group;
 
   return (
     <div className="space-y-6">
@@ -36,6 +58,8 @@ export default async function AdminGroupsPage({
           {activeTeams.length} squadre attive. Le squadre vengono sorteggiate e
           distribuite a serpentina; il calendario round robin di ogni girone
           viene creato automaticamente.
+          {smallTournament &&
+            " Con meno di 6 squadre viene creato un girone unico all'italiana."}
           {view.groups.length > 0 &&
             " Rigenerare cancella gironi e risultati esistenti!"}
         </p>
@@ -74,9 +98,9 @@ export default async function AdminGroupsPage({
                 standings={g.standings}
                 teamNames={view.teamNames}
                 highlight={
-                  tournament.format === "groups_only"
-                    ? 0
-                    : tournament.advance_per_group
+                  tournament.format === "groups_knockout"
+                    ? highlightedTeams
+                    : 0
                 }
               />
             </Card>

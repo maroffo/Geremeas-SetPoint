@@ -56,6 +56,10 @@ export function buildTournamentView(t: TournamentRow): TournamentView {
     teamAName: m.team_a !== null ? (names.get(m.team_a) ?? "?") : "—",
     teamBName: m.team_b !== null ? (names.get(m.team_b) ?? "?") : "—",
   });
+  const isAutomaticBye = (m: MatchView): boolean =>
+    m.status === "finished" &&
+    m.sets.length === 0 &&
+    (m.team_a === null) !== (m.team_b === null);
 
   const groups: GroupView[] = listGroups(t.id).map((g) => ({
     group: g,
@@ -76,7 +80,8 @@ export function buildTournamentView(t: TournamentRow): TournamentView {
       knockout
         .filter((m) => m.round === r && !m.is_third_place)
         .sort((a, b) => (a.bracket_pos ?? 0) - (b.bracket_pos ?? 0))
-        .map(toView),
+        .map(toView)
+        .filter((m) => !isAutomaticBye(m)),
     );
   }
   const thirdPlaceRow = knockout.find((m) => m.is_third_place === 1);

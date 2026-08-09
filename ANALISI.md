@@ -34,6 +34,7 @@ Sistema di gestione del torneo estivo di beach volley di Geremeas.
   - Numero di gironi configurabile (o calcolato dal sistema in base al numero di squadre).
   - Distribuzione delle squadre nei gironi casuale o con teste di serie.
 - **Fase a eliminazione diretta**: le prime N di ogni girone avanzano (N configurabile).
+  - Nel formato gironi + eliminazione, con meno di 6 squadre si crea un girone unico e avanzano tutte. Con 5 squadre, 4ª e 5ª giocano un quarto di finale; la vincente affronta la 1ª in semifinale, mentre l'altra semifinale è 2ª contro 3ª.
   - Seeding incrociato classico (1ª girone A vs 2ª girone B, ecc.).
   - Bracket con quarti/semifinali/finale ed eventuale finale 3º/4º posto.
 - Formati alternativi supportati: solo gironi (campionato) o sola eliminazione diretta, per tornei piccoli o brevi.

@@ -16,7 +16,10 @@ L'analisi funzionale completa è in [ANALISI.md](ANALISI.md).
   round robin) e **classifiche** con punti 3/2/1/0, quoziente set, quoziente
   punti e scontro diretto.
 - **Tabellone a eliminazione diretta** con seeding incrociato dai gironi, bye
-  per le teste di serie, finale 3º/4º posto e podio.
+  per le teste di serie, finale 3º/4º posto e podio. Nel formato misto, con
+  meno di 6 squadre si gioca un girone unico e avanzano tutte; con 5 squadre
+  la 4ª e la 5ª disputano il quarto che determina l'avversaria della 1ª in
+  semifinale.
 - **Punteggi** validati con le regole del beach volley (2 set su 3, set a 21,
   terzo set a 15, vantaggi con 2 punti di scarto) — regole configurabili per
   torneo. Gestione forfait con vittoria a tavolino.
@@ -64,7 +67,9 @@ npm run seed   # ricrea data/geremeas.db con torneo demo, squadre, gironi e risu
    **Admin → Iscrizioni**.
 3. In **Admin → Squadre** genera le squadre dai singoli (rigenerabile, con
    scambi manuali finché non crei i gironi).
-4. In **Admin → Gironi** scegli il numero di gironi: parte il calendario.
+4. In **Admin → Gironi** scegli il numero di gironi: nel formato misto, con
+   meno di 6 squadre il sistema imposta automaticamente un girone unico
+   all'italiana.
 5. Inserisci i risultati in **Admin → Partite**; classifiche e "prossime
    partite" si aggiornano da sole.
 6. A gironi conclusi genera il tabellone in **Admin → Tabellone**; i vincitori

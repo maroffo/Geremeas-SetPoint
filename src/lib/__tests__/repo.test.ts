@@ -7,6 +7,7 @@ const dbDir = fs.mkdtempSync(path.join(os.tmpdir(), "gsp-test-"));
 process.env.DATABASE_PATH = path.join(dbDir, "test.db");
 
 const repo = await import("../repo");
+const { buildTournamentView } = await import("../view");
 
 afterAll(() => {
   fs.rmSync(dbDir, { recursive: true, force: true });
@@ -210,5 +211,239 @@ describe("flusso completo del torneo", () => {
     const standings = repo.groupStandings(m.group_id!);
     expect(standings[0].teamId).toBe(m.team_a);
     expect(standings[0].points).toBe(3);
+  });
+});
+
+function createSmallTournament(
+  teamCount: number,
+  format: "groups_knockout" | "groups_only" | "knockout_only" =
+    "groups_knockout",
+): {
+  tournamentId: number;
+  teamIds: number[];
+} {
+  const tournamentId = repo.createTournament({
+    name: `Torneo ${teamCount} squadre`,
+    year: 2026,
+    teamSize: 4,
+    format,
+    bestOf: 3,
+    pointsPerSet: 21,
+    pointsLastSet: 15,
+    advancePerGroup: 2,
+  });
+  const teamIds: number[] = [];
+  for (let i = 1; i <= teamCount; i++) {
+    const teamId = repo.registerTeam(
+      tournamentId,
+      `Piccola ${teamCount}-${i}`,
+      `555${teamCount}${i}`,
+      fourPlayers(1),
+    );
+    repo.setTeamStatus(teamId, "active");
+    teamIds.push(teamId);
+  }
+  return { tournamentId, teamIds };
+}
+
+function finishRoundRobinWithRegistrationOrder(tournamentId: number): void {
+  const matches = repo
+    .listMatches(tournamentId)
+    .filter((m) => m.phase === "group");
+  for (const match of matches) {
+    const aWins = match.team_a! < match.team_b!;
+    repo.saveScore(match.id, [
+      { a: aWins ? 21 : 10, b: aWins ? 10 : 21 },
+      { a: aWins ? 21 : 12, b: aWins ? 12 : 21 },
+    ]);
+  }
+}
+
+describe("formula per tornei con meno di 6 squadre", () => {
+  it.each([2, 3])(
+    "%i squadre: richiede il girone unico prima del tabellone",
+    (teamCount) => {
+      const { tournamentId, teamIds } = createSmallTournament(teamCount);
+
+      expect(() => repo.generateKnockout(tournamentId)).toThrow(/girone unico/i);
+      expect(() => repo.generateGroups(tournamentId, 2)).toThrow(/girone unico/i);
+      repo.generateGroups(tournamentId, 1);
+      expect(repo.listGroups(tournamentId)).toHaveLength(1);
+      expect(
+        repo.listMatches(tournamentId).filter((m) => m.phase === "group"),
+      ).toHaveLength((teamCount * (teamCount - 1)) / 2);
+
+      finishRoundRobinWithRegistrationOrder(tournamentId);
+      repo.generateKnockout(tournamentId);
+      expect(
+        repo
+          .listMatches(tournamentId)
+          .filter((m) => m.phase === "knockout" && m.is_third_place),
+      ).toHaveLength(0);
+      const firstPlayedRound = repo
+        .listMatches(tournamentId)
+        .filter(
+          (m) =>
+            m.phase === "knockout" &&
+            m.round === 1 &&
+            m.team_a !== null &&
+            m.team_b !== null,
+        );
+      expect(firstPlayedRound).toHaveLength(1);
+      expect([firstPlayedRound[0].team_a, firstPlayedRound[0].team_b]).toEqual(
+        teamCount === 2
+          ? [teamIds[0], teamIds[1]]
+          : [teamIds[1], teamIds[2]],
+      );
+    },
+  );
+
+  it("4 squadre: impone il girone unico e genera le semifinali 1ª-4ª, 2ª-3ª", () => {
+    const { tournamentId, teamIds } = createSmallTournament(4);
+
+    expect(() => repo.generateKnockout(tournamentId)).toThrow(/girone unico/i);
+    expect(() => repo.generateGroups(tournamentId, 2)).toThrow(/girone unico/i);
+    repo.generateGroups(tournamentId, 1);
+    expect(repo.listGroups(tournamentId)).toHaveLength(1);
+    expect(
+      repo.listMatches(tournamentId).filter((m) => m.phase === "group"),
+    ).toHaveLength(6);
+
+    finishRoundRobinWithRegistrationOrder(tournamentId);
+    repo.generateKnockout(tournamentId);
+
+    const semifinals = repo
+      .listMatches(tournamentId)
+      .filter(
+        (m) =>
+          m.phase === "knockout" &&
+          m.round === 1 &&
+          !m.is_third_place,
+      );
+    expect(semifinals).toHaveLength(2);
+    expect(semifinals.map((m) => [m.team_a, m.team_b])).toEqual([
+      [teamIds[0], teamIds[3]],
+      [teamIds[1], teamIds[2]],
+    ]);
+  });
+
+  it("5 squadre: 4ª-5ª giocano il quarto e la vincente affronta la 1ª", () => {
+    const { tournamentId, teamIds } = createSmallTournament(5);
+
+    expect(() => repo.generateKnockout(tournamentId)).toThrow(/girone unico/i);
+    expect(() => repo.generateGroups(tournamentId, 2)).toThrow(/girone unico/i);
+    repo.generateGroups(tournamentId, 1);
+    expect(repo.listGroups(tournamentId)).toHaveLength(1);
+    expect(
+      repo.listMatches(tournamentId).filter((m) => m.phase === "group"),
+    ).toHaveLength(10);
+
+    finishRoundRobinWithRegistrationOrder(tournamentId);
+    repo.generateKnockout(tournamentId);
+
+    const knockout = repo
+      .listMatches(tournamentId)
+      .filter((m) => m.phase === "knockout" && !m.is_third_place);
+    const quarterfinals = knockout.filter((m) => m.round === 1);
+    const playedQuarterfinals = quarterfinals.filter(
+      (m) => m.team_a !== null && m.team_b !== null,
+    );
+    expect(playedQuarterfinals).toHaveLength(1);
+    expect([
+      playedQuarterfinals[0].team_a,
+      playedQuarterfinals[0].team_b,
+    ]).toEqual([teamIds[3], teamIds[4]]);
+    const view = buildTournamentView(repo.getTournament(tournamentId)!);
+    expect(view.knockoutRounds[0]).toHaveLength(1);
+    expect([
+      view.knockoutRounds[0][0].team_a,
+      view.knockoutRounds[0][0].team_b,
+    ]).toEqual([teamIds[3], teamIds[4]]);
+
+    const semifinals = knockout.filter((m) => m.round === 2);
+    expect(semifinals.map((m) => [m.team_a, m.team_b])).toEqual([
+      [teamIds[0], null],
+      [teamIds[1], teamIds[2]],
+    ]);
+
+    repo.saveScore(playedQuarterfinals[0].id, [
+      { a: 21, b: 10 },
+      { a: 21, b: 12 },
+    ]);
+    const firstSemifinal = repo
+      .listMatches(tournamentId)
+      .find(
+        (m) =>
+          m.phase === "knockout" &&
+          m.round === 2 &&
+          m.bracket_pos === 0,
+      )!;
+    expect([firstSemifinal.team_a, firstSemifinal.team_b]).toEqual([
+      teamIds[0],
+      teamIds[3],
+    ]);
+  });
+
+  it("blocca un girone da 5 diventato obsoleto dopo l'attivazione della 6ª squadra", () => {
+    const { tournamentId } = createSmallTournament(5);
+    repo.generateGroups(tournamentId, 1);
+    finishRoundRobinWithRegistrationOrder(tournamentId);
+
+    repo.setTournamentStatus(tournamentId, "registration");
+    const sixthTeam = repo.registerTeam(
+      tournamentId,
+      "Squadra numero sei",
+      "555-sixth",
+      fourPlayers(1),
+    );
+    repo.setTeamStatus(sixthTeam, "active");
+
+    expect(repo.listActiveTeams(tournamentId)).toHaveLength(6);
+    expect(() => repo.generateKnockout(tournamentId)).toThrow(
+      /rigenerare i gironi/i,
+    );
+  });
+
+  it("blocca il tabellone se cambia una squadra mantenendo lo stesso totale", () => {
+    const { tournamentId, teamIds } = createSmallTournament(5);
+    repo.generateGroups(tournamentId, 1);
+    finishRoundRobinWithRegistrationOrder(tournamentId);
+
+    repo.setTournamentStatus(tournamentId, "registration");
+    repo.setTeamStatus(teamIds[4], "withdrawn");
+    const replacement = repo.registerTeam(
+      tournamentId,
+      "Squadra sostitutiva",
+      "555-replacement",
+      fourPlayers(1),
+    );
+    repo.setTeamStatus(replacement, "active");
+
+    expect(repo.listActiveTeams(tournamentId)).toHaveLength(5);
+    expect(() => repo.generateKnockout(tournamentId)).toThrow(/girone unico/i);
+
+    repo.generateGroups(tournamentId, 1);
+    const regeneratedTeamIds = repo
+      .groupTeams(repo.listGroups(tournamentId)[0].id)
+      .map((team) => team.id);
+    expect(regeneratedTeamIds).toContain(replacement);
+    expect(regeneratedTeamIds).not.toContain(teamIds[4]);
+  });
+
+  it("non forza il girone unico nel formato solo gironi", () => {
+    const { tournamentId } = createSmallTournament(4, "groups_only");
+
+    expect(() => repo.generateGroups(tournamentId, 2)).not.toThrow();
+    expect(repo.listGroups(tournamentId)).toHaveLength(2);
+  });
+
+  it("mantiene il percorso diretto del formato a sola eliminazione", () => {
+    const { tournamentId } = createSmallTournament(5, "knockout_only");
+    repo.generateGroups(tournamentId, 1);
+
+    expect(() => repo.generateKnockout(tournamentId)).not.toThrow();
+    expect(
+      repo.listMatches(tournamentId).filter((m) => m.phase === "knockout"),
+    ).not.toHaveLength(0);
   });
 });
