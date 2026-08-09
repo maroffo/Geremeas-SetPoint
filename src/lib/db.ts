@@ -8,6 +8,7 @@ const MIN_AGE_DDL = "min_age INTEGER";
 const MAX_AGE_DDL = "max_age INTEGER";
 const AGE_CONFIRMED_DDL = "age_confirmed INTEGER NOT NULL DEFAULT 0";
 const CONTACT_INFO_DDL = "contact_info TEXT";
+const MATCH_MINUTES_DDL = "match_minutes INTEGER NOT NULL DEFAULT 40";
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS tournaments (
@@ -23,6 +24,7 @@ CREATE TABLE IF NOT EXISTS tournaments (
   ${MIN_AGE_DDL},
   ${MAX_AGE_DDL},
   ${CONTACT_INFO_DDL},
+  ${MATCH_MINUTES_DDL},
   status TEXT NOT NULL DEFAULT 'registration',
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -85,10 +87,38 @@ CREATE TABLE IF NOT EXISTS set_scores (
   UNIQUE (match_id, set_number)
 );
 
+CREATE TABLE IF NOT EXISTS tournament_days (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tournament_id INTEGER NOT NULL REFERENCES tournaments(id) ON DELETE CASCADE,
+  date TEXT NOT NULL,
+  start_time TEXT NOT NULL,
+  end_time TEXT NOT NULL,
+  UNIQUE (tournament_id, date)
+);
+
+CREATE TABLE IF NOT EXISTS courts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tournament_id INTEGER NOT NULL REFERENCES tournaments(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  UNIQUE (tournament_id, name)
+);
+
 CREATE TABLE IF NOT EXISTS tournament_posters (
   tournament_id INTEGER PRIMARY KEY REFERENCES tournaments(id) ON DELETE CASCADE,
   data BLOB NOT NULL,
   mime TEXT NOT NULL
+);
+
+-- Sessioni di amministrazione: il cookie porta il token in chiaro, qui resta
+-- solo il suo sha256, così un dump del DB non permette di autenticarsi.
+-- created_at/expires_at sono epoch millis (istanti assoluti, non orari di
+-- parete): niente confronti su stringhe naive.
+CREATE TABLE IF NOT EXISTS sessions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  token_hash TEXT NOT NULL UNIQUE,
+  role TEXT NOT NULL CHECK (role IN ('admin','scorekeeper')),
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_teams_tournament ON teams(tournament_id);
@@ -105,6 +135,7 @@ const MIGRATIONS: Array<{ table: string; column: string; ddl: string }> = [
   { table: "tournaments", column: "min_age", ddl: MIN_AGE_DDL },
   { table: "tournaments", column: "max_age", ddl: MAX_AGE_DDL },
   { table: "tournaments", column: "contact_info", ddl: CONTACT_INFO_DDL },
+  { table: "tournaments", column: "match_minutes", ddl: MATCH_MINUTES_DDL },
   { table: "teams", column: "age_confirmed", ddl: AGE_CONFIRMED_DDL },
   { table: "players", column: "age_confirmed", ddl: AGE_CONFIRMED_DDL },
 ];

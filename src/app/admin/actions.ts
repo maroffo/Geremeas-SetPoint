@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { loginAdmin, logoutAdmin, requireAdmin } from "@/lib/auth";
+import { loginAdmin, logoutAdmin, requireAdmin, requireScorer } from "@/lib/auth";
 import * as repo from "@/lib/repo";
 import type { SetInput, TournamentFormat, TournamentStatus } from "@/lib/types";
 
@@ -11,9 +11,14 @@ function errorMessage(e: unknown): string {
 }
 
 function done(back: string, error: string | null): never {
-  // back arriva da campi hidden: si accettano solo path interni,
-  // mai URL assoluti (open redirect).
-  const safeBack = back.startsWith("/") && !back.startsWith("//") ? back : "/admin";
+  // back arriva da campi hidden: si accettano solo path interni, mai URL
+  // assoluti (open redirect). Oltre a "//" si rifiuta anche "/\": i browser
+  // normalizzano il backslash a "/", quindi "/\evil.com" diventa
+  // protocol-relative verso un host esterno.
+  const safeBack =
+    back.startsWith("/") && !back.startsWith("//") && !back.startsWith("/\\")
+      ? back
+      : "/admin";
   revalidatePath("/");
   redirect(error ? `${safeBack}?error=${encodeURIComponent(error)}` : safeBack);
 }
@@ -24,8 +29,9 @@ function done(back: string, error: string | null): never {
 
 export async function loginAction(formData: FormData): Promise<void> {
   const pin = String(formData.get("pin") ?? "");
-  const ok = await loginAdmin(pin);
-  redirect(ok ? "/admin" : "/admin/login?error=PIN%20errato");
+  const role = await loginAdmin(pin);
+  if (!role) redirect("/admin/login?error=PIN%20errato");
+  redirect(role === "admin" ? "/admin" : "/admin/partite");
 }
 
 export async function logoutAction(): Promise<void> {
@@ -55,6 +61,7 @@ function settingsFromForm(formData: FormData): repo.TournamentSettings {
     minAge: optionalAge(formData, "minAge"),
     maxAge: optionalAge(formData, "maxAge"),
     contactInfo: String(formData.get("contactInfo") ?? "").trim() || null,
+    matchMinutes: Number(formData.get("matchMinutes") ?? 40),
   };
 }
 
@@ -99,6 +106,87 @@ export async function updateTournamentAction(formData: FormData): Promise<void> 
   done("/admin", error);
 }
 
+export async function addDayAction(formData: FormData): Promise<void> {
+  await requireAdmin();
+  const tournamentId = Number(formData.get("tournamentId"));
+  let error: string | null = null;
+  try {
+    repo.addDay(
+      tournamentId,
+      String(formData.get("date") ?? ""),
+      String(formData.get("startTime") ?? ""),
+      String(formData.get("endTime") ?? ""),
+    );
+  } catch (e) {
+    error = errorMessage(e);
+  }
+  done("/admin", error);
+}
+
+export async function deleteDayAction(formData: FormData): Promise<void> {
+  await requireAdmin();
+  let error: string | null = null;
+  try {
+    repo.deleteDay(Number(formData.get("dayId")));
+  } catch (e) {
+    error = errorMessage(e);
+  }
+  done("/admin", error);
+}
+
+export async function addCourtAction(formData: FormData): Promise<void> {
+  await requireAdmin();
+  const tournamentId = Number(formData.get("tournamentId"));
+  let error: string | null = null;
+  try {
+    repo.addCourt(tournamentId, String(formData.get("name") ?? ""));
+  } catch (e) {
+    error = errorMessage(e);
+  }
+  done("/admin", error);
+}
+
+export async function deleteCourtAction(formData: FormData): Promise<void> {
+  await requireAdmin();
+  let error: string | null = null;
+  try {
+    repo.deleteCourt(Number(formData.get("courtId")));
+  } catch (e) {
+    error = errorMessage(e);
+  }
+  done("/admin", error);
+}
+
+export async function generateScheduleAction(formData: FormData): Promise<void> {
+  await requireAdmin();
+  const tournamentId = Number(formData.get("tournamentId"));
+  let error: string | null = null;
+  try {
+    const { placed, unplaced } = repo.generateSchedule(tournamentId);
+    if (unplaced > 0)
+      error = `Calendario parziale: ${placed} partite programmate, ${unplaced} senza posto. Aggiungi giornate o campi, oppure allunga gli orari.`;
+  } catch (e) {
+    error = errorMessage(e);
+  }
+  done("/admin/partite", error);
+}
+
+export async function fillScheduleGapsAction(formData: FormData): Promise<void> {
+  await requireAdmin();
+  const tournamentId = Number(formData.get("tournamentId"));
+  let error: string | null = null;
+  try {
+    const { placed, unplaced } = repo.fillScheduleGaps(tournamentId);
+    if (unplaced > 0)
+      error = `Calendario parziale: ${placed} partite programmate, ${unplaced} senza posto dopo l'ultima partita già in calendario. Aggiungi giornate o campi.`;
+    else if (placed === 0)
+      error = "Nessuna partita da programmare: hanno già tutte un orario.";
+  } catch (e) {
+    error = errorMessage(e);
+  }
+  done("/admin/partite", error);
+}
+
 export async function updateTeamContactAction(formData: FormData): Promise<void> {
   await requireAdmin();
   const teamId = Number(formData.get("teamId"));
@@ -112,15 +200,37 @@ export async function updateTeamContactAction(formData: FormData): Promise<void>
   done(back, error);
 }
 
-export async function updatePlayerContactAction(
-  formData: FormData,
-): Promise<void> {
+export async function updatePlayerAction(formData: FormData): Promise<void> {
   await requireAdmin();
   const playerId = Number(formData.get("playerId"));
   const back = String(formData.get("back") ?? "/admin/iscrizioni");
   let error: string | null = null;
   try {
-    repo.updatePlayerContact(playerId, String(formData.get("contact") ?? ""));
+    const rawSkill = String(formData.get("skill") ?? "").trim();
+    repo.updatePlayer(
+      playerId,
+      String(formData.get("firstName") ?? ""),
+      String(formData.get("lastName") ?? ""),
+      rawSkill ? Number(rawSkill) : null,
+      String(formData.get("contact") ?? ""),
+    );
+  } catch (e) {
+    error = errorMessage(e);
+  }
+  done(back, error);
+}
+
+export async function createTeamAction(formData: FormData): Promise<void> {
+  await requireAdmin();
+  const tournamentId = Number(formData.get("tournamentId"));
+  const back = String(formData.get("back") ?? "/admin/iscrizioni");
+  let error: string | null = null;
+  try {
+    repo.createAdminTeam(
+      tournamentId,
+      String(formData.get("teamName") ?? ""),
+      String(formData.get("contact") ?? "").trim() || null,
+    );
   } catch (e) {
     error = errorMessage(e);
   }
@@ -227,7 +337,7 @@ export async function generateGroupsAction(formData: FormData): Promise<void> {
 }
 
 export async function saveScoreAction(formData: FormData): Promise<void> {
-  await requireAdmin();
+  await requireScorer();
   const matchId = Number(formData.get("matchId"));
   const sets: SetInput[] = [];
   for (let i = 1; i <= 3; i++) {
@@ -245,7 +355,7 @@ export async function saveScoreAction(formData: FormData): Promise<void> {
 }
 
 export async function forfeitAction(formData: FormData): Promise<void> {
-  await requireAdmin();
+  await requireScorer();
   const matchId = Number(formData.get("matchId"));
   const teamId = Number(formData.get("teamId"));
   let error: string | null = null;
@@ -258,7 +368,7 @@ export async function forfeitAction(formData: FormData): Promise<void> {
 }
 
 export async function clearScoreAction(formData: FormData): Promise<void> {
-  await requireAdmin();
+  await requireScorer();
   const matchId = Number(formData.get("matchId"));
   let error: string | null = null;
   try {

@@ -1,15 +1,23 @@
 import { FormMessages } from "@/components/FormMessages";
-import { btnPrimary, Card, inputCls } from "@/components/ui";
+import { btnPrimary, btnSecondary, Card, inputCls } from "@/components/ui";
 import { requireAdmin } from "@/lib/auth";
 import {
   getActiveTournament,
   hasPoster,
+  listCourts,
+  listDays,
   listTeams,
   listUnassignedSingles,
+  type CourtRow,
+  type DayRow,
   type TournamentRow,
 } from "@/lib/repo";
 import {
+  addCourtAction,
+  addDayAction,
   createTournamentAction,
+  deleteCourtAction,
+  deleteDayAction,
   setStatusAction,
   updateTournamentAction,
 } from "./actions";
@@ -167,6 +175,19 @@ function SettingsForm({
           ))}
         </select>
       </div>
+      <div>
+        <label className="mb-1 block text-sm font-medium">
+          Durata media partita (minuti)
+        </label>
+        <input
+          name="matchMinutes"
+          type="number"
+          min={10}
+          max={240}
+          defaultValue={t?.match_minutes ?? 40}
+          className={`${inputCls} w-full`}
+        />
+      </div>
       <div className="sm:col-span-2">
         <label className="mb-1 block text-sm font-medium">
           Contatti per gli iscritti (mostrati sul sito)
@@ -206,6 +227,103 @@ function SettingsForm({
         </button>
       </div>
     </form>
+  );
+}
+
+function DaysAndCourts({
+  tournament,
+  days,
+  courts,
+}: {
+  tournament: TournamentRow;
+  days: DayRow[];
+  courts: CourtRow[];
+}) {
+  const dateLabel = (d: string) =>
+    new Date(`${d}T00:00`).toLocaleDateString("it-IT", {
+      weekday: "short",
+      day: "numeric",
+      month: "long",
+    });
+  return (
+    <Card title="Giornate e campi">
+      <div className="grid gap-6 sm:grid-cols-2">
+        <div>
+          <div className="mb-2 text-sm font-medium">Giornate di gioco</div>
+          {days.length === 0 && (
+            <p className="mb-2 text-sm text-stone-500">
+              Nessuna giornata: aggiungile per generare il calendario.
+            </p>
+          )}
+          <ul className="mb-3 space-y-1">
+            {days.map((d) => (
+              <li key={d.id} className="flex items-center gap-2 text-sm">
+                <span>
+                  {dateLabel(d.date)} · {d.start_time}–{d.end_time}
+                </span>
+                <form action={deleteDayAction}>
+                  <input type="hidden" name="dayId" value={d.id} />
+                  <button className="text-red-600 hover:underline">
+                    rimuovi
+                  </button>
+                </form>
+              </li>
+            ))}
+          </ul>
+          <form action={addDayAction} className="flex flex-wrap items-center gap-2">
+            <input type="hidden" name="tournamentId" value={tournament.id} />
+            <input name="date" type="date" required className={`${inputCls} py-1`} />
+            <input
+              name="startTime"
+              type="time"
+              required
+              defaultValue="18:00"
+              className={`${inputCls} w-24 py-1`}
+            />
+            <input
+              name="endTime"
+              type="time"
+              required
+              defaultValue="20:30"
+              className={`${inputCls} w-24 py-1`}
+            />
+            <button className={btnSecondary}>+ Giornata</button>
+          </form>
+        </div>
+        <div>
+          <div className="mb-2 text-sm font-medium">Campi</div>
+          {courts.length === 0 && (
+            <p className="mb-2 text-sm text-stone-500">
+              Nessun campo: aggiungine almeno uno.
+            </p>
+          )}
+          <ul className="mb-3 space-y-1">
+            {courts.map((c) => (
+              <li key={c.id} className="flex items-center gap-2 text-sm">
+                <span>{c.name}</span>
+                <form action={deleteCourtAction}>
+                  <input type="hidden" name="courtId" value={c.id} />
+                  <button className="text-red-600 hover:underline">
+                    rimuovi
+                  </button>
+                </form>
+              </li>
+            ))}
+          </ul>
+          <form action={addCourtAction} className="flex flex-wrap items-center gap-2">
+            <input type="hidden" name="tournamentId" value={tournament.id} />
+            <input
+              name="name"
+              required
+              maxLength={30}
+              placeholder="Es. Campo 1"
+              className={`${inputCls} w-40 py-1`}
+            />
+            <button className={btnSecondary}>+ Campo</button>
+          </form>
+        </div>
+      </div>
+    </Card>
   );
 }
 
@@ -291,6 +409,14 @@ export default async function AdminDashboard({
           </p>
         )}
       </Card>
+
+      {tournament && (
+        <DaysAndCourts
+          tournament={tournament}
+          days={listDays(tournament.id)}
+          courts={listCourts(tournament.id)}
+        />
+      )}
 
       {tournament && (
         <Card title="Come funziona">

@@ -237,7 +237,7 @@ function createSmallTournament(
     const teamId = repo.registerTeam(
       tournamentId,
       `Piccola ${teamCount}-${i}`,
-      `555${teamCount}${i}`,
+      `333000${teamCount}${i}`,
       fourPlayers(1),
     );
     repo.setTeamStatus(teamId, "active");
@@ -393,7 +393,7 @@ describe("formula per tornei con meno di 6 squadre", () => {
     const sixthTeam = repo.registerTeam(
       tournamentId,
       "Squadra numero sei",
-      "555-sixth",
+      "333000006",
       fourPlayers(1),
     );
     repo.setTeamStatus(sixthTeam, "active");
@@ -414,7 +414,7 @@ describe("formula per tornei con meno di 6 squadre", () => {
     const replacement = repo.registerTeam(
       tournamentId,
       "Squadra sostitutiva",
-      "555-replacement",
+      "333000007",
       fourPlayers(1),
     );
     repo.setTeamStatus(replacement, "active");

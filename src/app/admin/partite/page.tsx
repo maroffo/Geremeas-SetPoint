@@ -1,8 +1,13 @@
 import { FormMessages } from "@/components/FormMessages";
 import { btnSecondary, Card, inputCls } from "@/components/ui";
 import { roundLabel } from "@/lib/bracket";
-import { requireAdmin } from "@/lib/auth";
-import { getActiveTournament, type TournamentRow } from "@/lib/repo";
+import { requireScorer } from "@/lib/auth";
+import {
+  getActiveTournament,
+  listCourts,
+  listDays,
+  type TournamentRow,
+} from "@/lib/repo";
 import {
   buildTournamentView,
   formatSchedule,
@@ -12,7 +17,9 @@ import {
 } from "@/lib/view";
 import {
   clearScoreAction,
+  fillScheduleGapsAction,
   forfeitAction,
+  generateScheduleAction,
   saveScoreAction,
   scheduleMatchAction,
 } from "../actions";
@@ -24,9 +31,11 @@ const BACK = "/admin/partite";
 function MatchAdmin({
   match,
   tournament,
+  canManage,
 }: {
   match: MatchView;
   tournament: TournamentRow;
+  canManage: boolean;
 }) {
   const ready = match.team_a !== null && match.team_b !== null;
   const played = match.status !== "scheduled";
@@ -98,26 +107,28 @@ function MatchAdmin({
             <button className={btnSecondary}>💾 Risultato</button>
           </form>
 
-          <form
-            action={scheduleMatchAction}
-            className="flex flex-wrap items-center gap-2"
-          >
-            <input type="hidden" name="matchId" value={match.id} />
-            <input type="hidden" name="back" value={BACK} />
-            <input
-              name="court"
-              defaultValue={match.court ?? ""}
-              placeholder="Campo"
-              className={`${inputCls} w-24 py-1`}
-            />
-            <input
-              name="scheduledAt"
-              type="datetime-local"
-              defaultValue={match.scheduled_at ?? ""}
-              className={`${inputCls} py-1`}
-            />
-            <button className={btnSecondary}>📅</button>
-          </form>
+          {canManage && (
+            <form
+              action={scheduleMatchAction}
+              className="flex flex-wrap items-center gap-2"
+            >
+              <input type="hidden" name="matchId" value={match.id} />
+              <input type="hidden" name="back" value={BACK} />
+              <input
+                name="court"
+                defaultValue={match.court ?? ""}
+                placeholder="Campo"
+                className={`${inputCls} w-24 py-1`}
+              />
+              <input
+                name="scheduledAt"
+                type="datetime-local"
+                defaultValue={match.scheduled_at ?? ""}
+                className={`${inputCls} py-1`}
+              />
+              <button className={btnSecondary}>📅</button>
+            </form>
+          )}
 
           <div className="flex items-center gap-2 text-xs">
             {!played && (
@@ -161,7 +172,9 @@ export default async function AdminMatchesPage({
 }: {
   searchParams: Promise<{ error?: string }>;
 }) {
-  await requireAdmin();
+  // Vista aperta anche al segnapunti: i punteggi si inseriscono da qui.
+  const role = await requireScorer();
+  const canManage = role === "admin";
   const params = await searchParams;
   const tournament = getActiveTournament();
 
@@ -174,9 +187,43 @@ export default async function AdminMatchesPage({
     view.groups.some((g) => g.matches.length > 0) ||
     view.knockoutRounds.length > 0;
 
+  const days = listDays(tournament.id);
+  const courts = listCourts(tournament.id);
+  const canSchedule = hasMatches && days.length > 0 && courts.length > 0;
+
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Partite</h1>
+      <div className="flex flex-wrap items-center gap-3">
+        <h1 className="text-2xl font-bold">Partite</h1>
+        {canSchedule && canManage && (
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            <form action={fillScheduleGapsAction}>
+              <input type="hidden" name="tournamentId" value={tournament.id} />
+              <button className={btnSecondary}>➕ Completa calendario</button>
+            </form>
+            <form action={generateScheduleAction}>
+              <input type="hidden" name="tournamentId" value={tournament.id} />
+              <button className={btnSecondary}>
+                🗓 Genera calendario (orari stimati)
+              </button>
+            </form>
+          </div>
+        )}
+      </div>
+      {canSchedule && canManage && (
+        <p className="text-sm text-stone-500">
+          <em>Completa calendario</em> dà un orario solo alle partite che non ce
+          l&apos;hanno, dopo l&apos;ultima già in programma: si usa a torneo
+          iniziato. <em>Genera calendario</em> rifà tutto da capo: da usare a
+          torneo non iniziato.
+        </p>
+      )}
+      {hasMatches && !canSchedule && canManage && (
+        <p className="text-sm text-stone-500">
+          Per generare il calendario definisci giornate e campi in{" "}
+          <em>Gestione torneo</em>.
+        </p>
+      )}
       <FormMessages ok={false} error={params.error ?? null} okMessage="" />
 
       {!hasMatches && (
@@ -189,7 +236,12 @@ export default async function AdminMatchesPage({
       {view.groups.map((g) => (
         <Card key={g.group.id} title={g.group.name}>
           {g.matches.map((m) => (
-            <MatchAdmin key={m.id} match={m} tournament={tournament} />
+            <MatchAdmin
+              key={m.id}
+              match={m}
+              tournament={tournament}
+              canManage={canManage}
+            />
           ))}
         </Card>
       ))}
@@ -200,14 +252,23 @@ export default async function AdminMatchesPage({
           title={`${roundLabel(i + 1, view.totalKnockoutRounds)} — eliminazione diretta`}
         >
           {matches.map((m) => (
-            <MatchAdmin key={m.id} match={m} tournament={tournament} />
+            <MatchAdmin
+              key={m.id}
+              match={m}
+              tournament={tournament}
+              canManage={canManage}
+            />
           ))}
           {i + 1 === view.totalKnockoutRounds && view.thirdPlace && (
             <>
               <div className="mt-2 text-sm font-semibold text-stone-500">
                 Finale 3º/4º posto
               </div>
-              <MatchAdmin match={view.thirdPlace} tournament={tournament} />
+              <MatchAdmin
+                match={view.thirdPlace}
+                tournament={tournament}
+                canManage={canManage}
+              />
             </>
           )}
         </Card>
